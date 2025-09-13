@@ -1,7 +1,8 @@
 #include <AccelStepper.h>
 
-#define PIN_STEP 12 // The ESP32 pin GPIO12 connected to STEP pin of DRV8825 module
-#define PIN_DIR 14  // The ESP32 pin GPIO14 connected to DIR pin of DRV8825 module
+#define PIN_STEP 12  // The ESP32 pin GPIO12 connected to STEP pin of DRV8825 module
+#define PIN_DIR 14   // The ESP32 pin GPIO14 connected to DIR pin of DRV8825 module
+#define PIN_SLEEP 27 // The ESP32 pin GPIO27 connected to SLEEP pin of DRV8825 module
 
 // Creates an instance
 AccelStepper stepper(AccelStepper::DRIVER, PIN_STEP, PIN_DIR);
@@ -12,10 +13,12 @@ void setup()
   delay(100);
   Serial.print("Setup(): start");
 
-  // set the maximum speed, acceleration factor
+  pinMode(PIN_SLEEP, OUTPUT);
+  digitalWrite(PIN_SLEEP, HIGH); // Keep driver awake initially
+
   stepper.setMaxSpeed(2000);
-  stepper.setAcceleration(200);
-  // set speed and the target position
+  stepper.setAcceleration(4000);
+
   stepper.setSpeed(1000);
   stepper.moveTo(800);
 
@@ -24,11 +27,18 @@ void setup()
 
 void loop()
 {
-
-  // // Change direction once the motor reaches target position
   if (stepper.distanceToGo() == 0)
-    stepper.moveTo(-stepper.currentPosition());
+  {
+    digitalWrite(PIN_SLEEP, LOW); // Put driver to sleep to reduce heat
+    delay(2000);
 
-  stepper.run(); // Move the motor one step
-  sleep(10000);
+    // Wake driver and allow time to stabilize (tWAKE ~ 1.7ms)
+    digitalWrite(PIN_SLEEP, HIGH);
+    delay(2);
+
+    stepper.moveTo(-stepper.currentPosition());
+  }
+
+  // Move the motor one step
+  stepper.run();
 }
