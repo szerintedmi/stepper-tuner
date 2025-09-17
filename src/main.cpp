@@ -4,6 +4,12 @@
 #define PIN_DIR 14   // The ESP32 pin GPIO14 connected to DIR pin of DRV8825 module
 #define PIN_SLEEP 27 // The ESP32 pin GPIO27 connected to SLEEP pin of DRV8825 module
 
+const long STEPS_PER_REV = 2038; // 2038 * 8; // W-20BYJ ???
+
+// Motion state
+bool goingToMax = true;        // toggles between 0 and STEPS_PER_REV
+unsigned long moveStartMs = 0; // start time of current move
+
 // Creates an instance
 AccelStepper stepper(AccelStepper::DRIVER, PIN_STEP, PIN_DIR);
 
@@ -11,34 +17,52 @@ void setup()
 {
   Serial.begin(115200);
   delay(100);
-  Serial.print("Setup(): start");
+  Serial.println("Setup(): start");
 
   pinMode(PIN_SLEEP, OUTPUT);
   digitalWrite(PIN_SLEEP, HIGH); // Keep driver awake initially
+  delay(5);                      // tWAKE ~1.7ms
 
-  stepper.setMaxSpeed(2000);
-  stepper.setAcceleration(4000);
+  stepper.setMinPulseWidth(2); // DRV8825 needs ~1.9 µs min
 
-  stepper.setSpeed(1000);
-  stepper.moveTo(800);
+  // Motion settings for geared W-20BYJ
+  // vmax=800; accel=4000 , limmit ~300mA --> single: 2.72s ; 8 rotation = 20.55s (2.6s avg)
+  // vmax=1000; accel=4000 , limit ~300mA --> single: 2.26s ; 8  rotation = 16.52s (2s avg)
+  stepper.setMaxSpeed(1200);      // W-20BYJ~1000 steps/sec
+  stepper.setAcceleration(400); // W-20BYJ~800 steps/sec^2 (quicker ramp to viable speed)
 
-  Serial.print("Setup(): done");
+  // Full 360° test: move exactly one output-shaft revolution
+  stepper.setCurrentPosition(0);
+  stepper.moveTo(STEPS_PER_REV);
+  Serial.printf("360° test: moving %ld steps...\n", STEPS_PER_REV);
+
+  moveStartMs = millis();
+
+  Serial.println("Setup(): done");
 }
 
 void loop()
 {
+  // Run motion profile toward target; when reached, wait 3s and reverse
+  stepper.run();
   if (stepper.distanceToGo() == 0)
   {
-    digitalWrite(PIN_SLEEP, LOW); // Put driver to sleep to reduce heat
+    // Print elapsed time for the just-completed rotation (exclude the pause)
+    unsigned long elapsed = millis() - moveStartMs;
+    float seconds = elapsed / 1000.0f;
+    Serial.printf("Full rotation time: %.2f s\n", seconds);
+
+    digitalWrite(PIN_SLEEP, LOW);
     delay(2000);
-
-    // Wake driver and allow time to stabilize (tWAKE ~ 1.7ms)
     digitalWrite(PIN_SLEEP, HIGH);
-    delay(2);
+    delay(5); // allow DRV8825 to fully wake (tWAKE ~1.7ms)
 
-    stepper.moveTo(-stepper.currentPosition());
+    goingToMax = !goingToMax;
+    long nextTarget = goingToMax ? STEPS_PER_REV : 0;
+    Serial.printf("Reversing to target: %ld steps\n", nextTarget);
+
+    stepper.moveTo(nextTarget);
+
+    moveStartMs = millis();
   }
-
-  // Move the motor one step
-  stepper.run();
 }
