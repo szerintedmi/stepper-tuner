@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>ESP32 Wi-Fi Status</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>ESP32 Wi-Fi Status</h1>
+      <div id="updated">—</div>
+    </header>
+
+    <main class="cards">
+      <section class="card">
+        <h2>Station (STA)</h2>
+        <div class="row">
+          <span class="label">Status</span>
+          <span class="value">
+            <span id="sta-dot" class="dot"></span>
+            <span id="sta-status">—</span>
+          </span>
+        </div>
+        <div class="row">
+          <span class="label">SSID</span>
+          <span id="sta-ssid" class="value">—</span>
+        </div>
+        <div class="row">
+          <span class="label">Channel</span>
+          <span id="sta-chan" class="value">—</span>
+        </div>
+        <div class="row small">
+          <span class="label">IP</span>
+          <span id="sta-ip" class="value">—</span>
+        </div>
+        <div class="row small">
+          <span class="label">MAC</span>
+          <span id="sta-mac" class="value mono">—</span>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>SoftAP (AP)</h2>
+        <div class="row">
+          <span class="label">Enabled</span>
+          <span class="value">
+            <span id="ap-dot" class="dot"></span>
+            <span id="ap-enabled">—</span>
+          </span>
+        </div>
+        <div class="row">
+          <span class="label">SSID</span>
+          <span id="ap-ssid" class="value">—</span>
+        </div>
+        <div class="row">
+          <span class="label">Channel</span>
+          <span id="ap-chan" class="value">—</span>
+        </div>
+        <div class="row small">
+          <span class="label">IP</span>
+          <span id="ap-ip" class="value">—</span>
+        </div>
+        <div class="row small">
+          <span class="label">Clients</span>
+          <span id="ap-clients" class="value">—</span>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Configure Wi-Fi</h2>
+        <div class="form-grid">
+          <label>
+            SSID
+            <input
+              id="cfg-ssid"
+              type="text"
+              autocomplete="username"
+              placeholder="Your Wi-Fi name"
+            />
+          </label>
+          <label>
+            Password
+            <input
+              id="cfg-pass"
+              type="password"
+              autocomplete="current-password"
+              placeholder="••••••••"
+            />
+          </label>
+          <div class="hint" id="saved-hint">Saved: —</div>
+          <div class="form-actions">
+            <button id="save">Save &amp; Connect</button>
+            <button id="forget" class="secondary">Forget saved Wi-Fi</button>
+          </div>
+          <div class="hint" id="save-msg"></div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <button id="refresh">Refresh</button>
+      <span id="error" class="error" hidden>Couldn’t reach status API</span>
+    </footer>
+
+    <script>
+      const el = (id) => document.getElementById(id);
+      const API_STATUS = "/wifi/api/status";
+      const API_SAVE = "/wifi/save";
+      const API_RESET = "/wifi/reset";
+
+      function setDot(id, on) {
+        const d = el(id);
+        d.classList.toggle("ok", !!on);
+        d.classList.toggle("bad", !on);
+      }
+      function setText(id, text) {
+        el(id).textContent =
+          text === null || text === undefined || text === "" ? "—" : text;
+      }
+
+      async function load() {
+        try {
+          el("error").hidden = true;
+          const res = await fetch(API_STATUS, { cache: "no-store" });
+          if (!res.ok) throw new Error(res.status);
+          const j = await res.json();
+
+          // STA
+          setText("sta-status", j.sta.connected ? "Connected" : "Disconnected");
+          setDot("sta-dot", j.sta.connected);
+          setText("sta-ssid", j.sta.ssid || "—");
+          setText("sta-chan", j.sta.channel ?? "—");
+          setText("sta-ip", j.sta.ip || "—");
+          setText("sta-mac", j.sta.mac || "—");
+
+          // AP
+          setText("ap-enabled", j.ap.enabled ? "Yes" : "No");
+          setDot("ap-dot", j.ap.enabled);
+          setText("ap-ssid", j.ap.ssid || "—");
+          setText("ap-chan", j.ap.channel ?? "—");
+          setText("ap-ip", j.ap.ip || "—");
+          setText("ap-clients", j.ap.clients ?? "—");
+
+          // Saved creds
+          const savedSsid = (j.saved && j.saved.ssid) || "";
+          const hasPass = !!(j.saved && j.saved.hasPass);
+          el("cfg-ssid").value = savedSsid;
+          el("saved-hint").textContent = savedSsid
+            ? `Saved: “${savedSsid}”${
+                hasPass ? " (password set)" : " (no password)"
+              }`
+            : "Saved: —";
+
+          el("updated").textContent =
+            "Updated: " + new Date().toLocaleTimeString();
+        } catch (e) {
+          el("error").hidden = false;
+          setDot("sta-dot", false);
+          setDot("ap-dot", false);
+        }
+      }
+
+      async function saveCreds() {
+        const ssid = el("cfg-ssid").value.trim();
+        const pass = el("cfg-pass").value; // allow empty
+        if (!ssid) {
+          el("save-msg").textContent = "SSID is required.";
+          return;
+        }
+        el("save").disabled = true;
+        el("forget").disabled = true;
+        el("save-msg").textContent = "Saving…";
+        try {
+          const body = new URLSearchParams({ ssid, pass });
+          const res = await fetch(API_SAVE, {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body,
+          });
+          const j = await res.json().catch(() => ({}));
+          if (!res.ok || !j.ok) throw new Error("Save failed");
+          if (j.connected) {
+            el("save-msg").textContent = `Connected. IP: ${j.ip || "—"}`;
+          } else {
+            el("save-msg").textContent = "Saved. Trying to connect…";
+          }
+          el("cfg-pass").value = ""; // don’t keep password in the field
+          load();
+        } catch (e) {
+          el("save-msg").textContent = "Error saving/connecting.";
+        } finally {
+          el("save").disabled = false;
+          el("forget").disabled = false;
+        }
+      }
+
+      async function resetCreds() {
+        if (!confirm("Forget saved SSID/password?")) return;
+        el("save").disabled = true;
+        el("forget").disabled = true;
+        el("save-msg").textContent = "Clearing…";
+        try {
+          const res = await fetch(API_RESET, { method: "POST" });
+          if (!res.ok) throw new Error();
+          el("cfg-ssid").value = "";
+          el("cfg-pass").value = "";
+          el("save-msg").textContent =
+            "Saved Wi-Fi cleared. Restart module to disconnect form Wi-Fi.";
+          load();
+        } catch {
+          el("save-msg").textContent = "Error clearing saved Wi-Fi.";
+        } finally {
+          el("save").disabled = false;
+          el("forget").disabled = false;
+        }
+      }
+
+      el("refresh").addEventListener("click", load);
+      el("save").addEventListener("click", saveCreds);
+      el("forget").addEventListener("click", resetCreds);
+
+      load();
+    </script>
+  </body>
+</html>

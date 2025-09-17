@@ -1,4 +1,5 @@
 #include <AccelStepper.h>
+#include "WifiPortal.h"
 
 #define PIN_STEP 12  // The ESP32 pin GPIO12 connected to STEP pin of DRV8825 module
 #define PIN_DIR 14   // The ESP32 pin GPIO14 connected to DIR pin of DRV8825 module
@@ -13,11 +14,38 @@ unsigned long moveStartMs = 0; // start time of current move
 // Creates an instance
 AccelStepper stepper(AccelStepper::DRIVER, PIN_STEP, PIN_DIR);
 
+// ================= Web server & WifiPortal =================
+
+AsyncWebServer webServer(80);
+WifiPortal wifiPortal(MESH_SSID, MESH_PASS);
+
+static void attachRoutes()
+{
+  if (!(LittleFS.begin(false) || LittleFS.begin(true))) // idempotent
+  {
+    Serial.println("LittleFS mount failed");
+    return;
+  }
+
+  webServer.serveStatic("/", LittleFS, "/")
+      .setDefaultFile("index.html")
+      .setFilter([](AsyncWebServerRequest *r)
+                 {
+                const String& u = r->url();
+                return !(u.startsWith("/wifi/api/") || u == "/wifi/api"); });
+
+  ;
+}
+
 void setup()
 {
   Serial.begin(115200);
   delay(100);
   Serial.println("Setup(): start");
+
+  attachRoutes();
+  wifiPortal.beginAndConnect(webServer, /*staTimeoutMs=*/10000);
+  webServer.begin();
 
   pinMode(PIN_SLEEP, OUTPUT);
   digitalWrite(PIN_SLEEP, HIGH); // Keep driver awake initially
@@ -28,7 +56,7 @@ void setup()
   // Motion settings for geared W-20BYJ
   // vmax=800; accel=4000 , limmit ~300mA --> single: 2.72s ; 8 rotation = 20.55s (2.6s avg)
   // vmax=1000; accel=4000 , limit ~300mA --> single: 2.26s ; 8  rotation = 16.52s (2s avg)
-  stepper.setMaxSpeed(1200);      // W-20BYJ~1000 steps/sec
+  stepper.setMaxSpeed(1200);    // W-20BYJ~1000 steps/sec
   stepper.setAcceleration(400); // W-20BYJ~800 steps/sec^2 (quicker ramp to viable speed)
 
   // Full 360° test: move exactly one output-shaft revolution
@@ -65,4 +93,5 @@ void loop()
 
     moveStartMs = millis();
   }
+  delay(10);
 }

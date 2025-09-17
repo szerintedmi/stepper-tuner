@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>ESP32 Wi-Fi</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Wi-Fi</h1>
+      <div id="updated">—</div>
+    </header>
+
+    <main class="cards">
+      <section class="card">
+        <h2>Connection</h2>
+        <div class="row">
+          <span class="label">Status</span>
+          <span class="value">
+            <span id="sta-dot" class="dot"></span>
+            <span id="sta-status">—</span>
+          </span>
+        </div>
+        <div class="row">
+          <span class="label">SSID</span>
+          <span id="sta-ssid" class="value">—</span>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <a href="/wifi/index.html"><button>More details</button></a>
+      <button id="refresh">Refresh</button>
+      <span id="error" class="error" hidden>Couldn’t reach status API</span>
+    </footer>
+
+    <script>
+      const el = (id) => document.getElementById(id);
+      const API_STATUS = "/wifi/api/status";
+
+      function setDot(id, on) {
+        const d = el(id);
+        d.classList.toggle("ok", !!on);
+        d.classList.toggle("bad", !on);
+      }
+      function setText(id, text) {
+        el(id).textContent =
+          text === null || text === undefined || text === "" ? "—" : text;
+      }
+
+      async function load() {
+        try {
+          el("error").hidden = true;
+          const res = await fetch(API_STATUS, { cache: "no-store" });
+          if (!res.ok) throw new Error(res.status);
+          const j = await res.json();
+
+          const connected = !!(j.sta && j.sta.connected);
+          setText("sta-status", connected ? "Connected" : "Disconnected");
+          setDot("sta-dot", connected);
+
+          // Show live SSID if connected, otherwise show saved SSID if present
+          const liveSsid = (j.sta && j.sta.ssid) || "";
+          const savedSsid = (j.saved && j.saved.ssid) || "";
+          setText("sta-ssid", liveSsid || savedSsid || "—");
+
+          el("updated").textContent =
+            "Updated: " + new Date().toLocaleTimeString();
+        } catch (e) {
+          el("error").hidden = false;
+          setDot("sta-dot", false);
+          setText("sta-status", "—");
+          setText("sta-ssid", "—");
+        }
+      }
+
+      el("refresh").addEventListener("click", load);
+      load();
+      setInterval(load, 3000);
+    </script>
+  </body>
+</html>
