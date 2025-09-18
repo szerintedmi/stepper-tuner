@@ -127,6 +127,10 @@ button {
 button:active {
   transform: translateY(1px);
 }
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 
 .error {
   color: var(--bad);
@@ -151,17 +155,62 @@ button:active {
   background: #0e141c;
   color: var(--text);
 }
+.form-grid select {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #0e141c;
+  color: var(--text);
+}
 .form-actions {
   display: flex;
   gap: 10px;
   margin-top: 6px;
+}
+.form-actions.wrap {
+  flex-wrap: wrap;
+}
+.form-actions.wrap button {
+  flex: 1 1 140px;
 }
 button.secondary {
   background: transparent;
   border: 1px solid var(--border);
   color: var(--text);
 }
+button.secondary.danger {
+  border-color: var(--bad);
+  color: var(--bad);
+}
 .hint {
   color: var(--muted);
   margin-top: 6px;
+}
+.input-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.input-row input {
+  flex: 1 1 auto;
+}
+.input-row select {
+  flex: 0 0 110px;
+}
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  font-weight: 600;
+}
+.toggle input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+  margin: 0;
+}
+.toggle span {
+  color: var(--text);
 }

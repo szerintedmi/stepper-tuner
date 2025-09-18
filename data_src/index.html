@@ -3,81 +3,508 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>ESP32 Wi-Fi</title>
+    <title>Stepper Tuner</title>
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
     <header>
-      <h1>Wi-Fi</h1>
-      <div id="updated">—</div>
+      <h1>Stepper Tuner</h1>
+      <div id="updated">Waiting…</div>
     </header>
 
     <main class="cards">
       <section class="card">
-        <h2>Connection</h2>
+        <h2>Motion Settings</h2>
+        <form id="settings-form" class="form-grid">
+          <label>
+            Steps per rev
+            <input id="steps-per-rev" type="number" min="1" step="1" required />
+          </label>
+          <label>
+            Target
+            <div class="input-row">
+              <input id="target-value" type="number" min="0" step="0.01" required />
+              <select id="target-units">
+                <option value="revs">Revs</option>
+                <option value="degrees">Degrees</option>
+                <option value="steps">Steps</option>
+              </select>
+            </div>
+          </label>
+          <label>
+            Max speed (steps/s)
+            <input id="max-speed" type="number" min="1" step="1" required />
+          </label>
+          <label>
+            Acceleration (steps/s²)
+            <input id="acceleration" type="number" min="1" step="1" required />
+          </label>
+          <div class="form-actions">
+            <button type="submit">Apply</button>
+            <button type="button" class="secondary" id="refresh">Refresh</button>
+          </div>
+          <div id="form-hint" class="hint"></div>
+        </form>
+      </section>
+
+      <section class="card">
+        <h2>Run Control</h2>
+        <div class="form-actions wrap">
+          <button type="button" id="run-forward">Run Forward</button>
+          <button type="button" id="run-reverse">Run Reverse</button>
+          <button type="button" id="run-pingpong">Ping-Pong</button>
+          <button type="button" class="secondary" id="reset-position">Reset Position</button>
+          <button type="button" class="secondary" id="driver-toggle">Sleep Driver</button>
+          <button type="button" class="secondary danger" id="run-stop">Stop</button>
+        </div>
+        <div id="run-hint" class="hint"></div>
+        <div id="driver-hint" class="hint"></div>
+        <label class="toggle">
+          <input type="checkbox" id="auto-sleep" checked />
+          <span>Auto sleep driver</span>
+        </label>
+      </section>
+
+      <section class="card">
+        <h2>Status</h2>
         <div class="row">
-          <span class="label">Status</span>
+          <span class="label">Mode</span>
+          <span class="value" id="status-mode">—</span>
+        </div>
+        <div class="row">
+          <span class="label">Moving</span>
           <span class="value">
-            <span id="sta-dot" class="dot"></span>
-            <span id="sta-status">—</span>
+            <span id="status-dot" class="dot"></span>
+            <span id="status-moving">—</span>
           </span>
         </div>
         <div class="row">
-          <span class="label">SSID</span>
-          <span id="sta-ssid" class="value">—</span>
+          <span class="label">Driver</span>
+          <span class="value">
+            <span id="driver-dot" class="dot"></span>
+            <span id="driver-state">—</span>
+          </span>
+        </div>
+        <div class="row">
+          <span class="label">Direction</span>
+          <span class="value" id="status-direction">—</span>
+        </div>
+        <div class="row">
+          <span class="label">Segment (steps)</span>
+          <span class="value mono" id="status-segment">—</span>
+        </div>
+        <div class="row">
+          <span class="label">Position</span>
+          <span class="value mono" id="status-position">—</span>
+        </div>
+        <div class="row">
+          <span class="label">Target</span>
+          <span class="value mono" id="status-target">—</span>
+        </div>
+        <div class="row">
+          <span class="label">Distance</span>
+          <span class="value mono" id="status-distance">—</span>
+        </div>
+        <div class="row">
+          <span class="label">Speed</span>
+          <span class="value mono" id="status-speed">—</span>
         </div>
       </section>
     </main>
 
-    <footer>
-      <a href="/wifi/index.html"><button>More details</button></a>
-      <button id="refresh">Refresh</button>
-      <span id="error" class="error" hidden>Couldn’t reach status API</span>
-    </footer>
-
     <script>
       const el = (id) => document.getElementById(id);
-      const API_STATUS = "/wifi/api/status";
+      const form = el("settings-form");
+      const stepsInput = el("steps-per-rev");
+      const targetInput = el("target-value");
+      const targetUnits = el("target-units");
+      const maxSpeedInput = el("max-speed");
+      const accelInput = el("acceleration");
+      const formHint = el("form-hint");
+      const runHint = el("run-hint");
+      const driverHint = el("driver-hint");
+      const updatedEl = el("updated");
+      const statusMode = el("status-mode");
+      const statusMoving = el("status-moving");
+      const statusDot = el("status-dot");
+      const driverDot = el("driver-dot");
+      const driverState = el("driver-state");
+      const statusDirection = el("status-direction");
+      const statusSegment = el("status-segment");
+      const statusPosition = el("status-position");
+      const statusTarget = el("status-target");
+      const statusDistance = el("status-distance");
+      const statusSpeed = el("status-speed");
+      const driverButton = el("driver-toggle");
+      const runButtons = [el("run-forward"), el("run-reverse"), el("run-pingpong")];
+      const resetButton = el("reset-position");
+      const autoSleepToggle = el("auto-sleep");
+      let currentState = null;
+      let pollTimer = null;
+      let formDirty = false;
+      let lastRunStartSeen = null;
 
-      function setDot(id, on) {
-        const d = el(id);
-        d.classList.toggle("ok", !!on);
-        d.classList.toggle("bad", !on);
-      }
-      function setText(id, text) {
-        el(id).textContent =
-          text === null || text === undefined || text === "" ? "—" : text;
-      }
+      const markDirty = () => {
+        formDirty = true;
+      };
 
-      async function load() {
-        try {
-          el("error").hidden = true;
-          const res = await fetch(API_STATUS, { cache: "no-store" });
-          if (!res.ok) throw new Error(res.status);
-          const j = await res.json();
+      [stepsInput, targetInput, maxSpeedInput, accelInput].forEach((input) => {
+        input.addEventListener("input", markDirty);
+      });
 
-          const connected = !!(j.sta && j.sta.connected);
-          setText("sta-status", connected ? "Connected" : "Disconnected");
-          setDot("sta-dot", connected);
-
-          // Show live SSID if connected, otherwise show saved SSID if present
-          const liveSsid = (j.sta && j.sta.ssid) || "";
-          const savedSsid = (j.saved && j.saved.ssid) || "";
-          setText("sta-ssid", liveSsid || savedSsid || "—");
-
-          el("updated").textContent =
-            "Updated: " + new Date().toLocaleTimeString();
-        } catch (e) {
-          el("error").hidden = false;
-          setDot("sta-dot", false);
-          setText("sta-status", "—");
-          setText("sta-ssid", "—");
+      const numberOrNull = (value) => (typeof value === "number" && !Number.isNaN(value) ? value : null);
+      const formatInt = (value) => {
+        const num = numberOrNull(value);
+        return num === null ? "—" : Math.round(num).toString();
+      };
+      const formatFloat = (value, decimals = 2) => {
+        const num = numberOrNull(value);
+        return num === null ? "—" : num.toFixed(decimals);
+      };
+      const setInputValue = (input, value) => {
+        if (document.activeElement === input) return;
+        if (value === undefined || value === null || value === "") {
+          input.value = "";
+        } else {
+          input.value = value;
         }
-      }
+      };
+      const setHint = (node, text, isError = false) => {
+        node.textContent = text || "";
+        node.classList.toggle("error", !!isError);
+      };
+      const setDot = (node, on) => {
+        node.classList.toggle("ok", !!on);
+        node.classList.toggle("bad", !on);
+      };
 
-      el("refresh").addEventListener("click", load);
-      load();
-      setInterval(load, 3000);
+      const unitMeta = {
+        revs: { step: 0.01, min: 0 },
+        degrees: { step: 0.1, min: 0 },
+        steps: { step: 1, min: 1 },
+      };
+
+      const normalizeUnits = (value) => {
+        if (value === "steps") return "steps";
+        if (value === "degrees") return "degrees";
+        return "revs";
+      };
+
+      const applyUnitMeta = (units) => {
+        const meta = unitMeta[units] || unitMeta.revs;
+        targetInput.step = meta.step;
+        targetInput.min = meta.min;
+        targetInput.placeholder = units;
+      };
+
+      const renderState = (data) => {
+        currentState = data;
+        const settings = data?.settings || {};
+        const status = data?.status || {};
+        const units = normalizeUnits(settings.targetUnits || targetUnits.value || "revs");
+        const awake = status.driverAwake !== false;
+        const autoSleepEnabled = settings.autoSleep !== false;
+
+        const activeUnits = formDirty ? normalizeUnits(targetUnits.value || units) : units;
+        applyUnitMeta(activeUnits);
+        if (!formDirty) {
+          setInputValue(stepsInput, settings.stepsPerRev ?? "");
+          targetUnits.value = units;
+          let targetVal;
+          if (units === "steps") {
+            targetVal = settings.targetSteps;
+          } else if (units === "degrees") {
+            targetVal = settings.targetDegrees;
+          } else {
+            targetVal = settings.targetRevs;
+          }
+          if (targetVal !== undefined) {
+            const formatted =
+              units === "steps"
+                ? Math.round(targetVal)
+                : units === "degrees"
+                ? Number(targetVal).toFixed(1)
+                : Number(targetVal).toFixed(3);
+            setInputValue(targetInput, formatted);
+          }
+          setInputValue(maxSpeedInput, settings.maxSpeed !== undefined ? Math.round(settings.maxSpeed) : "");
+          setInputValue(accelInput, settings.acceleration !== undefined ? Math.round(settings.acceleration) : "");
+          if (settings.maxSpeedLimit) {
+            const limit = Math.round(settings.maxSpeedLimit);
+            maxSpeedInput.max = limit;
+            maxSpeedInput.title = `Limit ${limit} steps/s`;
+            if (!formHint.textContent) {
+              setHint(formHint, `Speed limit: ${limit} steps/s`);
+            }
+          }
+        }
+        autoSleepToggle.checked = autoSleepEnabled;
+
+        const moving = !!status.moving;
+        statusMode.textContent = (status.mode || "idle").toUpperCase();
+        statusMoving.textContent = moving ? "Running" : "Idle";
+        setDot(statusDot, moving);
+        setDot(driverDot, awake);
+        driverState.textContent = awake ? "Awake" : "Sleeping";
+        driverButton.textContent = awake ? "Sleep Driver" : "Wake Driver";
+        driverButton.classList.toggle("danger", awake);
+        runButtons.forEach((btn) => {
+          btn.disabled = !autoSleepEnabled && !awake;
+        });
+        const hintParts = [];
+        if (!awake) {
+          hintParts.push(autoSleepEnabled ? "Sleeping (wakes on run)" : "Driver sleeping");
+        }
+        hintParts.push(autoSleepEnabled ? "Auto sleep on" : "Auto sleep off");
+        setHint(driverHint, hintParts.join(" · "));
+        statusDirection.textContent = (status.direction ?? 1) >= 0 ? "Forward" : "Reverse";
+        statusSegment.textContent = formatInt(status.segmentSteps);
+        statusPosition.textContent = formatInt(status.currentPosition);
+        statusTarget.textContent = formatInt(status.targetPosition);
+        statusDistance.textContent = formatInt(status.distanceToGo);
+        statusSpeed.textContent = formatFloat(status.speed, 1);
+        updatedEl.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+
+        if (status.mode === "single" && moving) {
+          setHint(runHint, "Running…");
+        }
+
+        const lastRun = status.lastRun || {};
+        if (lastRun.valid && typeof lastRun.startMs === "number") {
+          if (lastRun.startMs !== lastRunStartSeen) {
+            const durationSec = (Number(lastRun.durationMs) || 0) / 1000;
+            const stepsDone = Number(lastRun.steps) || 0;
+            const speedSet = settings.maxSpeed !== undefined ? Math.round(settings.maxSpeed) : 0;
+            const accelSet = settings.acceleration !== undefined ? Math.round(settings.acceleration) : 0;
+            const gapUs = Number(lastRun.loopMaxGapUs) || 0;
+            const gapText = gapUs > 0 ? ` gap: ${(gapUs / 1000).toFixed(3)}ms` : "";
+            const prefix = lastRun.aborted ? "Aborted" : "Finished";
+            setHint(
+              runHint,
+              `${prefix} · steps: ${Math.round(Math.abs(stepsDone))} speed: ${speedSet} accel: ${accelSet} time: ${durationSec.toFixed(2)}s${gapText}`,
+            );
+            lastRunStartSeen = lastRun.startMs;
+          }
+        }
+      };
+
+      const fetchState = async (showErrors = false) => {
+        try {
+          const res = await fetch("/api/state", { cache: "no-store" });
+          if (!res.ok) throw new Error(res.status);
+          const data = await res.json();
+          renderState(data);
+          if (showErrors) setHint(formHint, "");
+        } catch (err) {
+          if (showErrors) {
+            setHint(formHint, "Could not load state", true);
+          }
+        }
+      };
+
+      const sendSettings = async (payload) => {
+        const res = await fetch("/api/settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(text || res.statusText);
+        }
+        return res.json();
+      };
+
+      const applySettings = async () => {
+        const units = normalizeUnits(targetUnits.value);
+        const stepsPerRev = Number.parseInt(stepsInput.value, 10);
+        const targetValueRaw = Number.parseFloat(targetInput.value);
+        const maxSpeed = Number.parseFloat(maxSpeedInput.value);
+        const acceleration = Number.parseFloat(accelInput.value);
+
+        if (!Number.isFinite(stepsPerRev) || stepsPerRev < 1) {
+          setHint(formHint, "Steps per rev must be at least 1", true);
+          return false;
+        }
+        if (!Number.isFinite(targetValueRaw) || targetValueRaw < 0) {
+          setHint(formHint, "Target must be zero or positive", true);
+          return false;
+        }
+        if (!Number.isFinite(maxSpeed) || maxSpeed < 1) {
+          setHint(formHint, "Set a valid max speed", true);
+          return false;
+        }
+        if (!Number.isFinite(acceleration) || acceleration < 1) {
+          setHint(formHint, "Set a valid acceleration", true);
+          return false;
+        }
+
+        const payload = {
+          stepsPerRev,
+          targetUnits: units,
+          targetValue:
+            units === "steps"
+              ? Math.max(1, Math.round(targetValueRaw))
+              : units === "degrees"
+              ? Math.max(0, Math.round(targetValueRaw * 10) / 10)
+              : targetValueRaw,
+          maxSpeed,
+          acceleration,
+        };
+
+        try {
+          setHint(formHint, "Saving…");
+          const data = await sendSettings(payload);
+          formDirty = false;
+          renderState(data);
+          setHint(formHint, "Settings updated");
+          return true;
+        } catch (err) {
+          setHint(formHint, err.message || "Failed to save", true);
+          return false;
+        }
+      };
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        await applySettings();
+      });
+
+      const sendRun = async (payload) => {
+        const res = await fetch("/api/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(text || res.statusText);
+        }
+        return res.json();
+      };
+
+      const sendReset = async () => {
+        const res = await fetch("/api/reset", { method: "POST" });
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(text || res.statusText);
+        }
+        return res.json();
+      };
+
+      const runWith = async (mode, direction) => {
+        if (mode !== "stop" && formDirty) {
+          const applyChanges = window.confirm("Apply motion settings before running?");
+          if (applyChanges) {
+            const applied = await applySettings();
+            if (!applied) {
+              setHint(runHint, "Run canceled – fix motion settings", true);
+              return;
+            }
+          }
+        }
+
+        try {
+          setHint(runHint, mode === "stop" ? "Stopping…" : "Command sent");
+          const data = await sendRun({ mode, direction });
+          renderState(data);
+          if (mode === "stop") {
+            setHint(runHint, "Stopped");
+          } else if (mode === "single") {
+            setHint(runHint, "Running");
+          } else if (mode === "pingpong") {
+            setHint(runHint, "Ping-pong running");
+          }
+        } catch (err) {
+          setHint(runHint, err.message || "Failed", true);
+        }
+      };
+
+      el("run-forward").addEventListener("click", () => runWith("single", 1));
+      el("run-reverse").addEventListener("click", () => runWith("single", -1));
+      el("run-pingpong").addEventListener("click", () => runWith("pingpong", 1));
+      el("run-stop").addEventListener("click", () => runWith("stop", 0));
+      resetButton.addEventListener("click", async () => {
+        try {
+          setHint(runHint, "Resetting…");
+          const data = await sendReset();
+          renderState(data);
+          setHint(runHint, "Position reset");
+        } catch (err) {
+          setHint(runHint, err.message || "Failed", true);
+        }
+      });
+      el("refresh").addEventListener("click", () => {
+        formDirty = false;
+        fetchState(true);
+      });
+
+      const sendDriver = async (awake) => {
+        const res = await fetch("/api/driver", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ awake }),
+        });
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(text || res.statusText);
+        }
+        return res.json();
+      };
+
+      driverButton.addEventListener("click", async () => {
+        const nextAwake = !(currentState?.status?.driverAwake !== false);
+        try {
+          setHint(driverHint, nextAwake ? "Waking…" : "Sleeping…");
+          const data = await sendDriver(nextAwake);
+          renderState(data);
+        } catch (err) {
+          setHint(driverHint, err.message || "Failed", true);
+        }
+      });
+
+      autoSleepToggle.addEventListener("change", async () => {
+        const enabled = autoSleepToggle.checked;
+        try {
+          setHint(driverHint, enabled ? "Enabling auto sleep…" : "Disabling auto sleep…");
+          const data = await sendSettings({ autoSleep: enabled });
+          renderState(data);
+        } catch (err) {
+          setHint(driverHint, err.message || "Failed", true);
+        }
+      });
+
+      targetUnits.addEventListener("change", () => {
+        markDirty();
+        const units = normalizeUnits(targetUnits.value);
+        applyUnitMeta(units);
+        if (!currentState) return;
+        const settings = currentState.settings || {};
+        let value;
+        if (units === "steps") {
+          value = settings.targetSteps;
+        } else if (units === "degrees") {
+          value = settings.targetDegrees;
+        } else {
+          value = settings.targetRevs;
+        }
+        if (value !== undefined) {
+          const formatted =
+            units === "steps"
+              ? Math.round(value)
+              : units === "degrees"
+              ? Number(value).toFixed(1)
+              : Number(value).toFixed(3);
+          setInputValue(targetInput, formatted);
+        }
+      });
+
+      const startPolling = () => {
+        if (pollTimer) clearInterval(pollTimer);
+        pollTimer = setInterval(fetchState, 1500);
+      };
+
+      fetchState(true).then(startPolling);
     </script>
   </body>
 </html>
