@@ -7,10 +7,12 @@
 #include <esp_now.h>
 #include "esp_wifi.h" // for esp_wifi_get_channel
 
-#define MESH_SSID "ESP32-WiFi-Setup"
-
 #if __has_include("secrets.h")
 #include "secrets.h"
+#endif
+
+#ifndef MESH_PASS
+#define MESH_SSID "ESP32-WiFi-Setup"
 #endif
 
 #ifndef MESH_PASS
@@ -83,7 +85,10 @@ private:
     {
         // Force AP to the chosen channel at boot
         uint8_t channel = WiFi.channel();
-        if (!WiFi.softAP(_apSsid, _apPass, channel, /*hidden=*/0, /*max conn=*/3))
+        const char *apSsid = _apSsid.c_str();
+        const char *apPass = _apPass.c_str();
+
+        if (!WiFi.softAP(apSsid, apPass, channel, /*hidden=*/0, /*max conn=*/3))
         {
             Serial.println("WifiPortal: Error initializing softAP for Mesh");
             return false;
@@ -104,16 +109,18 @@ private:
         esp_now_add_peer(&peer);
 
         Serial.printf("WifiPortal: Mesh SoftAP started. SSID:%s Ch:%u IP:%s\n",
-                      _apSsid, channel, WiFi.softAPIP().toString().c_str());
+                      apSsid, channel, WiFi.softAPIP().toString().c_str());
         return true;
     }
 
     void _startSetupAP()
     {
-        Serial.printf("WifiPortal: Starting Wifi Mesh in AP mode for config. SSID: %s password: %s\n", _apSsid, _apPass);
+        const char *apSsid = _apSsid.c_str();
+        const char *apPass = _apPass.c_str();
+        Serial.printf("WifiPortal: Starting Wifi Mesh in AP mode for config. SSID: %s password: %s\n", apSsid, apPass);
         WiFi.mode(WIFI_AP);
         // esp_wifi_set_ps(WIFI_PS_NONE); // don't go to sleep NB: can't disable sleep with BT enabled
-        WiFi.softAP(_apSsid, _apPass); // starting on channel 1 by default
+        WiFi.softAP(apSsid, apPass); // starting on channel 1 by default
     }
 
     void _connectToWifi(uint32_t timeoutMs)
