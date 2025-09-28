@@ -82,6 +82,9 @@ void HttpRoutes::writeState(JsonVariant root)
   settings["maxSpeedLimit"] = st.settings.maxSpeedLimit;
   settings["acceleration"] = st.settings.acceleration;
   settings["autoSleep"] = st.settings.autoSleep;
+  settings["limitsEnabled"] = st.settings.limitsEnabled;
+  settings["limitMin"] = st.settings.limitMin;
+  settings["limitMax"] = st.settings.limitMax;
 
   JsonArray motors = obj["motors"].to<JsonArray>();
   for (const auto &motor : st.motors)
@@ -111,6 +114,11 @@ void HttpRoutes::writeState(JsonVariant root)
     last["steps"] = motor.lastRun.steps;
     last["loopMaxGapUs"] = motor.lastRun.loopMaxGapUs;
   }
+
+  JsonObject limitStatus = obj["limitStatus"].to<JsonObject>();
+  limitStatus["triggered"] = st.limit.triggered;
+  limitStatus["sequence"] = st.limit.sequence;
+  limitStatus["motorId"] = st.limit.motorId;
 }
 
 void HttpRoutes::sendState(AsyncWebServerRequest *request)
@@ -214,6 +222,22 @@ void HttpRoutes::handleSettings(AsyncWebServerRequest *request, JsonVariant &jso
   {
     patch.hasAutoSleep = true;
     patch.autoSleep = obj["autoSleep"].as<bool>();
+  }
+
+  if (!obj["limitsEnabled"].isNull())
+  {
+    patch.hasLimitsEnabled = true;
+    patch.limitsEnabled = obj["limitsEnabled"].as<bool>();
+  }
+  if (!obj["limitMin"].isNull())
+  {
+    patch.hasLimitMin = true;
+    patch.limitMin = obj["limitMin"].as<long>();
+  }
+  if (!obj["limitMax"].isNull())
+  {
+    patch.hasLimitMax = true;
+    patch.limitMax = obj["limitMax"].as<long>();
   }
 
   motion.applySettings(patch);

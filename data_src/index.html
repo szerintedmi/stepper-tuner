@@ -28,10 +28,9 @@
             <thead>
               <tr>
                 <th>Motor</th>
-                <th>Status</th>
                 <th>Pos</th>
                 <th>Target</th>
-                <th>Actions</th>
+                <th class="limits-head hidden">Limits</th>
               </tr>
             </thead>
             <tbody id="motors-table-body">
@@ -83,18 +82,32 @@
             Acceleration (steps/s²)
             <input id="acceleration" type="number" min="1" step="1" required />
           </label>
+          <label class="toggle">
+            <input type="checkbox" id="limits-enabled" />
+            <span>Enable motion limits</span>
+          </label>
+          <div id="limit-settings" class="limit-grid hidden">
+            <label>
+              Min position (steps)
+              <input id="limit-min" type="number" step="1" />
+            </label>
+            <label>
+              Max position (steps)
+              <input id="limit-max" type="number" step="1" />
+            </label>
+          </div>
+          <label class="toggle" id="auto-sleep-toggle">
+            <input type="checkbox" id="auto-sleep" checked />
+            <span>Auto sleep driver</span>
+          </label>
         </form>
-        <div class="form-actions">
+        <div class="form-actions motion-actions">
           <button type="button" id="save-defaults">Save defaults</button>
           <button type="button" class="secondary" id="reset-default">
             Reset to default
           </button>
         </div>
         <div id="form-hint" class="hint"></div>
-        <label class="toggle">
-          <input type="checkbox" id="auto-sleep" checked />
-          <span>Auto sleep driver</span>
-        </label>
       </section>
     </main>
 
@@ -104,6 +117,12 @@
       const stepsInput = el("steps-per-rev");
       const maxSpeedInput = el("max-speed");
       const accelInput = el("acceleration");
+      const limitsToggle = el("limits-enabled");
+      const limitSettings = el("limit-settings");
+      const limitMinInput = el("limit-min");
+      const limitMaxInput = el("limit-max");
+      limitMinInput.disabled = true;
+      limitMaxInput.disabled = true;
       const autoSleepToggle = el("auto-sleep");
       const formHint = el("form-hint");
       const runHint = el("run-hint");
@@ -119,11 +138,15 @@
       const motorEditorSleep = el("motor-editor-sleep");
       const motorEditorAddBtn = el("motor-editor-add");
       const motorsTableBody = el("motors-table-body");
+      const limitsHead = document.querySelector(".limits-head");
 
       const motorTargets = new Map();
       let defaultTarget = { units: "revs", value: 0 };
       let defaultTargetValues = { revs: 0, degrees: 0, steps: 0 };
       let editingTarget = false;
+      let defaultLimitRange = { min: 0, max: 0 };
+      let lastLimitSequence = 0;
+      let maxSpeedLimitNote = null;
 
       const numberOrNull = (value) =>
         typeof value === "number" && !Number.isNaN(value) ? value : null;
@@ -210,6 +233,78 @@
         return stepsValue / spr;
       };
 
+      const computeDefaultLimitRange = (stepsPerRev) => {
+        if (!Number.isFinite(stepsPerRev) || stepsPerRev <= 0) {
+          return { min: 0, max: 0 };
+        }
+        const spr = Math.round(stepsPerRev);
+        const half = Math.round(spr / 2);
+        return { min: -half, max: half };
+      };
+
+      const updateLimitInputsState = (enabled) => {
+        limitSettings.classList.toggle("hidden", !enabled);
+        limitMinInput.disabled = !enabled;
+        limitMaxInput.disabled = !enabled;
+      };
+
+      const readLimitInputs = () => {
+        const limitMin = Number.parseInt(limitMinInput.value, 10);
+        const limitMax = Number.parseInt(limitMaxInput.value, 10);
+        if (!Number.isFinite(limitMin) || !Number.isFinite(limitMax)) {
+          setHint(formHint, "Enter valid limit min/max", true);
+          return null;
+        }
+        if (limitMin > limitMax) {
+          setHint(formHint, "Limit min must be ≤ max", true);
+          return null;
+        }
+        return { limitMin, limitMax };
+      };
+
+      const getEffectiveLimits = () => {
+        const settings = currentState?.settings || {};
+        const stepsPerRev = numberOrNull(settings.stepsPerRev);
+        const fallback = computeDefaultLimitRange(stepsPerRev);
+        const min = Number(settings.limitMin);
+        const max = Number(settings.limitMax);
+        return {
+          min: Number.isFinite(min) ? Math.round(min) : fallback.min,
+          max: Number.isFinite(max) ? Math.round(max) : fallback.max,
+        };
+      };
+
+      const runToAbsolutePosition = async (motorId, targetPosition, label) => {
+        const motor = (currentState?.motors || []).find((m) => m.id === motorId);
+        if (!motor) {
+          throw new Error("Motor not found");
+        }
+
+        const currentPosition = Number(motor.currentPosition) || 0;
+        let delta = Math.round(targetPosition - currentPosition);
+        if (delta === 0) {
+          setHint(runHint, `Motor ${motorId}: already at ${label}`);
+          return;
+        }
+
+        const direction = delta >= 0 ? 1 : -1;
+        if (delta < 0) {
+          delta = -delta;
+        }
+
+        try {
+          const settingsData = await sendSettings({ targetUnits: "steps", targetSteps: delta });
+          renderState(settingsData);
+          setHint(runHint, `Motor ${motorId}: starting ${label}…`);
+          const runData = await sendRun(motorId, "single", direction);
+          renderState(runData);
+          setHint(runHint, `Motor ${motorId}: running ${label}`);
+        } catch (err) {
+          setHint(runHint, err.message || `Failed to move to ${label}`, true);
+          throw err;
+        }
+      };
+
 
       const lastRunStartSeen = new Map();
       let currentState = null;
@@ -255,6 +350,21 @@
           value: defaultTargetValues[targetUnits] ?? 0,
         };
 
+        const limitsEnabled = settings.limitsEnabled === true;
+        const limitMinValue = numberOrNull(settings.limitMin);
+        const limitMaxValue = numberOrNull(settings.limitMax);
+        defaultLimitRange = computeDefaultLimitRange(stepsPerRev);
+        limitsToggle.checked = limitsEnabled;
+        setInputValue(
+          limitMinInput,
+          limitMinValue !== null ? limitMinValue : defaultLimitRange.min
+        );
+        setInputValue(
+          limitMaxInput,
+          limitMaxValue !== null ? limitMaxValue : defaultLimitRange.max
+        );
+        updateLimitInputsState(limitsEnabled);
+
         motorTargets.forEach((entry, key) => {
           if (entry && entry.dirty) {
             return;
@@ -282,20 +392,25 @@
             ? Math.round(settings.acceleration)
             : ""
         );
+        autoSleepToggle.checked = settings.autoSleep !== false;
+
+        if (!maxSpeedLimitNote) {
+          maxSpeedLimitNote = document.createElement("span");
+          maxSpeedLimitNote.id = "max-speed-limit-note";
+          maxSpeedLimitNote.className = "field-note";
+          maxSpeedInput.parentElement.append(maxSpeedLimitNote);
+        }
 
         if (settings.maxSpeedLimit) {
           const limit = Math.round(settings.maxSpeedLimit);
           maxSpeedInput.max = limit;
           maxSpeedInput.title = `Limit ${limit} steps/s`;
-          if (!formHint.textContent) {
-            setHint(formHint, `Speed limit: ${limit} steps/s`);
-          }
+          maxSpeedLimitNote.textContent = `Limit ${limit} steps/s`;
         } else {
           maxSpeedInput.removeAttribute("max");
           maxSpeedInput.removeAttribute("title");
+          maxSpeedLimitNote.textContent = "";
         }
-
-        autoSleepToggle.checked = settings.autoSleep !== false;
       };
 
       const createDot = (on) => {
@@ -348,12 +463,17 @@
 
         const fragment = document.createDocumentFragment();
         const autoSleepEnabled = settings.autoSleep !== false;
+        const limitsEnabled = settings.limitsEnabled === true;
+        if (limitsHead) {
+          limitsHead.classList.toggle("hidden", !limitsEnabled);
+        }
         const seen = new Set();
         let lastRunMessage = null;
 
         if (!motors.length) {
+          const colspan = limitsEnabled ? 5 : 4;
           motorsTableBody.innerHTML =
-            '<tr class="empty"><td colspan="5">No motors configured. Use Edit motors to add one.</td></tr>';
+            `<tr class="empty"><td colspan="${colspan}">No motors configured. Use Edit motors to add one.</td></tr>`;
           lastRunStartSeen.clear();
           motorTargets.clear();
           if (!runHint.textContent) {
@@ -389,22 +509,42 @@
           motorHeader.className = "motor-header";
           motorHeader.append(motorName, motorPins);
           motorCell.append(motorHeader);
-          tr.append(motorCell);
 
-          const statusCell = document.createElement("td");
-          statusCell.className = "motor-status";
-          statusCell.append(
-            createStatusChip(moving, moving ? "Running" : "Idle"),
-            createStatusChip(
-              driverAwake,
-              driverAwake ? "Driver awake" : "Driver sleeping"
+          const statusGrid = document.createElement("div");
+          statusGrid.className = "motor-status-grid";
+
+          const idleColumn = document.createElement("div");
+          idleColumn.className = "status-column";
+          idleColumn.append(createStatusChip(moving, moving ? "Running" : "Idle"));
+          idleColumn.append(
+            createActionButton("Stop", "stop", motor.id, !canStop, ["stop-button"])
+          );
+
+          const sleepColumn = document.createElement("div");
+          sleepColumn.className = "status-column";
+          sleepColumn.append(
+            createStatusChip(driverAwake, driverAwake ? "Driver awake" : "Sleeping")
+          );
+          sleepColumn.append(
+            createActionButton(
+              driverAwake ? "Sleep" : "Wake",
+              "toggle-driver",
+              motor.id,
+              false,
+              ["secondary"]
             )
           );
-          tr.append(statusCell);
+
+          statusGrid.append(idleColumn, sleepColumn);
+          motorCell.append(statusGrid);
+          tr.append(motorCell);
 
           const positionCell = document.createElement("td");
           positionCell.className = "motor-position";
-          positionCell.textContent = formatInt(motor.currentPosition);
+          const positionValue = document.createElement("span");
+          positionValue.className = "motor-position-value";
+          positionValue.textContent = formatInt(motor.currentPosition);
+          positionCell.append(positionValue);
           tr.append(positionCell);
 
           const targetCell = document.createElement("td");
@@ -499,30 +639,48 @@
             persistTarget(units, display, true);
           });
 
-          targetWrap.append(targetInput, unitsSelect);
+          const targetRow = document.createElement("div");
+          targetRow.className = "target-row";
+          targetRow.append(targetInput, unitsSelect);
+
+          const runRow = document.createElement("div");
+          runRow.className = "target-run-row";
+          runRow.append(
+            createActionButton("Reverse", "run-reverse", motor.id, !canRun),
+            createActionButton("Forward", "run-forward", motor.id, !canRun)
+          );
+
+          const pingRow = document.createElement("div");
+          pingRow.className = "target-ping-row";
+          pingRow.append(
+            createActionButton("Ping-Pong", "run-pingpong", motor.id, !canRun, ["secondary"])
+          );
+
+          targetWrap.append(targetRow, runRow, pingRow);
           targetCell.append(targetWrap);
           tr.append(targetCell);
 
-          const actionsCell = document.createElement("td");
-          actionsCell.className = "actions";
-          const actionsWrap = document.createElement("div");
-          actionsWrap.className = "motor-actions";
-          actionsWrap.append(
-            createActionButton("Forward", "run-forward", motor.id, !canRun),
-            createActionButton("Reverse", "run-reverse", motor.id, !canRun),
-            createActionButton("Ping-Pong", "run-pingpong", motor.id, !canRun, ["secondary"]),
-            createActionButton("Stop", "stop", motor.id, !canStop, ["secondary", "danger"]),
-            createActionButton(
-              driverAwake ? "Sleep" : "Wake",
-              "toggle-driver",
-              motor.id,
-              false,
-              ["secondary"]
-            ),
-            createActionButton("Reset", "reset", motor.id, false, ["secondary"])
-          );
-          actionsCell.append(actionsWrap);
-          tr.append(actionsCell);
+          const resetButton = createActionButton("Reset", "reset", motor.id, false, ["secondary", "reset-button"]);
+          positionCell.append(resetButton);
+
+          if (limitsEnabled) {
+            const limitsCell = document.createElement("td");
+            limitsCell.className = "limits-cell";
+            const limitsRow = document.createElement("div");
+            limitsRow.className = "limits-actions";
+            const limitsTop = document.createElement("div");
+            limitsTop.className = "limits-top-row";
+            limitsTop.append(
+              createActionButton("Min", "run-min", motor.id, !canRun),
+              createActionButton("Max", "run-max", motor.id, !canRun)
+            );
+            const midRow = document.createElement("div");
+            midRow.className = "limits-mid-row";
+            midRow.append(createActionButton("Mid", "run-mid", motor.id, !canRun));
+            limitsRow.append(limitsTop, midRow);
+            limitsCell.append(limitsRow);
+            tr.append(limitsCell);
+          }
 
           const lastRun = motor.lastRun || {};
           if (lastRun.valid && typeof lastRun.startMs === "number") {
@@ -639,6 +797,15 @@
           renderMotorEditor(motors);
         }
 
+        const limitStatus = data?.limitStatus || {};
+        const sequence = Number(limitStatus.sequence) || 0;
+        if (sequence && sequence !== lastLimitSequence) {
+          lastLimitSequence = sequence;
+          const motorId = Number(limitStatus.motorId) || 0;
+          const suffix = motorId > 0 ? ` (motor ${motorId})` : "";
+          setHint(runHint, `Motion limit triggered${suffix}`);
+        }
+
         updatedEl.textContent = `Updated ${new Date().toLocaleTimeString()}`;
       };
 
@@ -718,6 +885,81 @@
       [stepsInput, maxSpeedInput, accelInput].forEach((input) => {
         input.addEventListener("change", () => {
           void saveSettingsFromInputs();
+        });
+      });
+
+      const sendLimitSettings = async (payload) => {
+        try {
+          setHint(formHint, "");
+          const data = await sendSettings(payload);
+          renderState(data);
+        } catch (err) {
+          setHint(formHint, err.message || "Failed to update limits", true);
+          throw err;
+        }
+      };
+
+      limitsToggle.addEventListener("change", async () => {
+        const enabled = limitsToggle.checked;
+        if (enabled) {
+          if (limitMinInput.value === "" && limitMaxInput.value === "") {
+            limitMinInput.value = defaultLimitRange.min;
+            limitMaxInput.value = defaultLimitRange.max;
+          } else {
+            if (limitMinInput.value === "") {
+              limitMinInput.value = defaultLimitRange.min;
+            }
+            if (limitMaxInput.value === "") {
+              limitMaxInput.value = defaultLimitRange.max;
+            }
+          }
+        }
+
+        updateLimitInputsState(enabled);
+
+        if (enabled) {
+          const values = readLimitInputs();
+          if (!values) {
+            limitsToggle.checked = false;
+            updateLimitInputsState(false);
+            return;
+          }
+          try {
+            await sendLimitSettings({ limitsEnabled: true, ...values });
+            setHint(runHint, "Motion limits enabled");
+          } catch (err) {
+            limitsToggle.checked = false;
+            updateLimitInputsState(false);
+          }
+        } else {
+          try {
+            await sendLimitSettings({ limitsEnabled: false });
+            setHint(runHint, "Motion limits disabled");
+          } catch (err) {
+            limitsToggle.checked = true;
+            updateLimitInputsState(true);
+          }
+        }
+      });
+
+      [limitMinInput, limitMaxInput].forEach((input) => {
+        input.addEventListener("change", async () => {
+          if (!limitsToggle.checked) {
+            return;
+          }
+          const values = readLimitInputs();
+          if (!values) {
+            return;
+          }
+          try {
+            await sendLimitSettings(values);
+          } catch (err) {
+            const fallback = currentState?.settings || {};
+            limitMinInput.value =
+              fallback.limitMin ?? defaultLimitRange.min;
+            limitMaxInput.value =
+              fallback.limitMax ?? defaultLimitRange.max;
+          }
         });
       });
 
@@ -897,6 +1139,25 @@
             const data = await sendRun(motorId, "single", -1);
             renderState(data);
             setHint(runHint, `Motor ${motorId}: running reverse`);
+          } else if (action === "run-max" || action === "run-mid" || action === "run-min") {
+            if (!currentState?.settings?.limitsEnabled) {
+              setHint(runHint, "Enable motion limits to use preset moves", true);
+              return;
+            }
+            const limits = getEffectiveLimits();
+            let label;
+            let targetPosition;
+            if (action === "run-max") {
+              label = "max";
+              targetPosition = limits.max;
+            } else if (action === "run-min") {
+              label = "min";
+              targetPosition = limits.min;
+            } else {
+              label = "mid";
+              targetPosition = Math.round((limits.min + limits.max) / 2);
+            }
+            await runToAbsolutePosition(motorId, targetPosition, label);
           } else if (action === "run-pingpong") {
             await ensureTargetForMotor(motorId);
             setHint(runHint, `Motor ${motorId}: starting ping-pong…`);

@@ -166,7 +166,7 @@ button:disabled {
   gap: 10px;
   margin-top: 4px;
 }
-.form-grid label {
+.form-grid label:not(.toggle) {
   display: grid;
   gap: 6px;
   font-weight: 600;
@@ -178,6 +178,7 @@ button:disabled {
   border: 1px solid var(--border);
   background: #0e141c;
   color: var(--text);
+  max-width: 160px;
 }
 .form-grid select {
   width: 100%;
@@ -186,11 +187,134 @@ button:disabled {
   border: 1px solid var(--border);
   background: #0e141c;
   color: var(--text);
+  max-width: 160px;
+}
+.field-note {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+.limit-grid {
+  display: contents;
+}
+.limit-grid label {
+  padding-left: 16px;
+}
+.limit-grid label input {
+  max-width: 120px;
+}
+.motor-position {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+.motor-position-value {
+  font-weight: 600;
+}
+.reset-button {
+  align-self: flex-start;
+}
+.motor-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+  align-items: flex-start;
+}
+.motor-controls button {
+  flex: 0 0 auto;
+}
+.stop-button {
+  padding: 8px 18px;
+  min-width: 94px;
+  background: rgba(220, 56, 72, 0.85);
+  color: #fff;
+  border: 1px solid rgba(220, 56, 72, 0.95);
+  box-shadow: 0 0 10px rgba(220, 56, 72, 0.2);
+}
+.stop-button:hover {
+  background: rgba(220, 56, 72, 1);
+}
+.stop-button:active {
+  transform: translateY(0);
+}
+.motor-status-grid {
+  display: flex;
+  gap: 16px;
+  margin-top: 8px;
+  align-items: flex-start;
+}
+.status-column {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+.status-column .status-chip {
+  width: 110px;
+  justify-content: center;
+}
+.status-column button {
+  width: 110px;
+}
+.target-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.target-run-row,
+.target-ping-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+.target-run-row button {
+  flex: 1 1 76px;
+  max-width: 110px;
+}
+.target-ping-row {
+  justify-content: center;
+}
+.target-ping-row button {
+  flex: 0 0 70px;
+  white-space: nowrap;
+}
+.limits-cell {
+  min-width: 160px;
+}
+.limits-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 160px;
+  align-items: center;
+}
+.limits-top-row {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  justify-content: space-between;
+}
+.limits-top-row button {
+  flex: 0 0 70px;
+}
+.limits-mid-row {
+  display: flex;
+  justify-content: center;
+}
+.limits-mid-row button {
+  width: 70px;
+  margin-top: 2px;
 }
 .form-actions {
   display: flex;
   gap: 10px;
   margin-top: 6px;
+}
+.form-actions.motion-actions {
+  margin-top: 16px;
 }
 .form-actions.wrap {
   flex-wrap: wrap;
@@ -292,17 +416,16 @@ button.compact {
   color: var(--muted);
 }
 
-.motors-table td.actions {
-  min-width: 220px;
-}
-
 
 .motors-table tbody tr {
   transition: background 120ms ease;
 }
 
-.motors-table tbody tr:nth-child(even) td {
+.motors-table tbody tr:nth-child(even) {
   background: rgba(255, 255, 255, 0.03);
+}
+.motors-table tbody tr:nth-child(even) td {
+  background: transparent;
 }
 
 
@@ -403,10 +526,10 @@ button.compact {
 }
 
 .motor-target {
-  display: inline-flex;
-  align-items: center;
+  display: flex;
+  flex-direction: column;
   gap: 6px;
-  flex-wrap: wrap;
+  align-items: stretch;
 }
 
 .motor-target-input,
@@ -419,21 +542,11 @@ button.compact {
 }
 
 .motor-target-input {
-  width: 74px;
+  width: 80px;
 }
 
 .motor-target-units {
-  min-width: 82px;
-}
-
-.motor-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.motor-actions button {
-  flex: 0 0 auto;
+  min-width: 88px;
 }
 
 .motor-editor {
@@ -503,4 +616,19 @@ button.compact {
 .motor-add-grid input {
   width: 64px;
   text-align: center;
+}
+#settings-form .toggle {
+  margin-top: 4px;
+}
+#settings-form .toggle input {
+  margin-right: 4px;
+}
+#settings-form input[type="number"] {
+  max-width: 140px;
+}
+#settings-form select {
+  max-width: 140px;
+}
+.form-actions.motion-actions button {
+  min-width: 120px;
 }

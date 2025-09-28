@@ -38,6 +38,15 @@ struct SettingsPatch
 
   bool hasAutoSleep = false;
   bool autoSleep = false;
+
+  bool hasLimitsEnabled = false;
+  bool limitsEnabled = false;
+
+  bool hasLimitMin = false;
+  long limitMin = 0;
+
+  bool hasLimitMax = false;
+  long limitMax = 0;
 };
 
 struct StepperState
@@ -53,7 +62,17 @@ struct StepperState
     float maxSpeedLimit = 0.0f;
     float acceleration = 0.0f;
     bool autoSleep = false;
+    bool limitsEnabled = false;
+    long limitMin = 0;
+    long limitMax = 0;
   } settings;
+
+  struct LimitStatus
+  {
+    bool triggered = false;
+    uint32_t sequence = 0;
+    uint16_t motorId = 0;
+  } limit;
 
   struct Motor
   {
@@ -138,6 +157,9 @@ private:
     float acceleration = 0.0f;
     float maxSpeedLimit = 0.0f;
     bool autoSleep = true;
+    bool limitsEnabled = false;
+    long limitMin = 0;
+    long limitMax = 0;
   } config;
 
   FastAccelStepperEngine engine;
@@ -161,6 +183,7 @@ private:
   MotorManager::Motor *findMotor(uint16_t motorId);
   const MotorManager::Motor *findMotor(uint16_t motorId) const;
   void updateIdleSegmentSteps();
+  bool applyLimits(MotorManager::Motor &motor, long &targetPosition);
 
   void resetLastRun(MotorManager::Motor &motor);
   void recordLastRun(MotorManager::Motor &motor, bool aborted);
@@ -177,6 +200,10 @@ private:
   void loadDefaults();
   void loadMotorsFromPrefs();
   void persistMotors();
+
+  uint32_t limitEventSequence = 0;
+  uint16_t limitEventMotorId = 0;
+  mutable uint32_t lastReportedLimitEventSequence = 0;
 };
 
 } // namespace StepperControl

@@ -1,5 +1,7 @@
 #include "StepperMotion.h"
 
+#include <algorithm>
+
 namespace
 {
   constexpr long DEFAULT_STEPS_PER_REV = 2038;
@@ -20,6 +22,9 @@ namespace
 #define STEPPER_PREF_KEY_SLEEP "sleep"
 #define STEPPER_PREF_KEY_MOTORS "motors"
 #define STEPPER_PREF_KEY_NEXT_ID "nextId"
+#define STEPPER_PREF_KEY_LIMIT_ENABLED "limEn"
+#define STEPPER_PREF_KEY_LIMIT_MIN "limMin"
+#define STEPPER_PREF_KEY_LIMIT_MAX "limMax"
 
 namespace StepperControl
 {
@@ -103,6 +108,30 @@ namespace StepperControl
     config.maxSpeed = maxSpeed;
     config.acceleration = acceleration;
     config.autoSleep = autoSleep;
+
+    long defaultHalfSpan = roundToLong(static_cast<double>(config.stepsPerRev) / 2.0);
+    long defaultLimitMin = -defaultHalfSpan;
+    long defaultLimitMax = defaultHalfSpan;
+    bool limitsEnabled = false;
+    long limitMin = defaultLimitMin;
+    long limitMax = defaultLimitMax;
+
+    if (prefsOpen)
+    {
+      limitsEnabled = prefs.getBool(STEPPER_PREF_KEY_LIMIT_ENABLED, limitsEnabled);
+      limitMin = prefs.getLong(STEPPER_PREF_KEY_LIMIT_MIN, limitMin);
+      limitMax = prefs.getLong(STEPPER_PREF_KEY_LIMIT_MAX, limitMax);
+    }
+
+    if (limitMin > limitMax)
+    {
+      limitMin = defaultLimitMin;
+      limitMax = defaultLimitMax;
+    }
+
+    config.limitsEnabled = limitsEnabled;
+    config.limitMin = limitMin;
+    config.limitMax = limitMax;
 
     updateTarget(TargetUnits::Revs, DEFAULT_REVS);
   }
@@ -201,6 +230,34 @@ namespace StepperControl
     }
   }
 
+  bool Motion::applyLimits(MotorManager::Motor &motor, long &targetPosition)
+  {
+    if (!config.limitsEnabled)
+    {
+      return false;
+    }
+
+    long limited = targetPosition;
+    if (limited > config.limitMax)
+    {
+      limited = config.limitMax;
+    }
+    if (limited < config.limitMin)
+    {
+      limited = config.limitMin;
+    }
+
+    if (limited == targetPosition)
+    {
+      return false;
+    }
+
+    targetPosition = limited;
+    limitEventMotorId = motor.id;
+    limitEventSequence++;
+    return true;
+  }
+
   void Motion::resetLastRun(MotorManager::Motor &motor)
   {
     motor.lastRun.valid = false;
@@ -287,13 +344,20 @@ namespace StepperControl
 
     motor.motion.currentDirection = (direction >= 0) ? 1 : -1;
     motor.motion.anchorPosition = motor.stepper->getCurrentPosition();
-    motor.motion.segmentSteps = config.target.steps;
     motor.motion.segmentStartPos = motor.motion.anchorPosition;
     motor.motion.segmentStartMs = millis();
     resetLastRun(motor);
     motor.lastRun.startMs = motor.motion.segmentStartMs;
 
-    long target = motor.motion.anchorPosition + motor.motion.currentDirection * motor.motion.segmentSteps;
+    long requestedSteps = config.target.steps;
+    long target = motor.motion.anchorPosition + motor.motion.currentDirection * requestedSteps;
+    applyLimits(motor, target);
+    long delta = target - motor.motion.anchorPosition;
+    if (delta < 0)
+    {
+      delta = -delta;
+    }
+    motor.motion.segmentSteps = delta;
     MoveResultCode res = motor.stepper->moveTo(target);
     if (res != MOVE_OK)
     {
@@ -320,7 +384,20 @@ namespace StepperControl
     resetLastRun(motor);
     motor.lastRun.startMs = motor.motion.segmentStartMs;
 
-    long target = motor.motion.anchorPosition + motor.motion.currentDirection * motor.motion.segmentSteps;
+    long requestedSteps = config.target.steps;
+    long target = motor.motion.anchorPosition + motor.motion.currentDirection * requestedSteps;
+    applyLimits(motor, target);
+    long delta = target - motor.motion.anchorPosition;
+    if (delta < 0)
+    {
+      delta = -delta;
+    }
+    motor.motion.segmentSteps = delta;
+    if (delta == 0)
+    {
+      motor.motion.mode = RunMode::Idle;
+      return;
+    }
     MoveResultCode res = motor.stepper->moveTo(target);
     if (res != MOVE_OK)
     {
@@ -587,9 +664,16 @@ namespace StepperControl
     out.settings.maxSpeedLimit = config.maxSpeedLimit;
     out.settings.acceleration = config.acceleration;
     out.settings.autoSleep = config.autoSleep;
+    out.settings.limitsEnabled = config.limitsEnabled;
+    out.settings.limitMin = config.limitMin;
+    out.settings.limitMax = config.limitMax;
 
     if (!motorManager)
     {
+      out.limit.triggered = limitEventSequence != lastReportedLimitEventSequence;
+      out.limit.sequence = limitEventSequence;
+      out.limit.motorId = limitEventMotorId;
+      lastReportedLimitEventSequence = limitEventSequence;
       return out;
     }
 
@@ -628,6 +712,11 @@ namespace StepperControl
 
       out.motors.push_back(report);
     }
+
+    out.limit.triggered = limitEventSequence != lastReportedLimitEventSequence;
+    out.limit.sequence = limitEventSequence;
+    out.limit.motorId = limitEventMotorId;
+    lastReportedLimitEventSequence = limitEventSequence;
 
     return out;
   }
@@ -836,6 +925,9 @@ namespace StepperControl
     ok &= prefs.putFloat(STEPPER_PREF_KEY_SPEED, config.maxSpeed) > 0;
     ok &= prefs.putFloat(STEPPER_PREF_KEY_ACCEL, config.acceleration) > 0;
     ok &= prefs.putBool(STEPPER_PREF_KEY_SLEEP, config.autoSleep) > 0;
+    ok &= prefs.putBool(STEPPER_PREF_KEY_LIMIT_ENABLED, config.limitsEnabled) > 0;
+    ok &= prefs.putLong(STEPPER_PREF_KEY_LIMIT_MIN, config.limitMin) > 0;
+    ok &= prefs.putLong(STEPPER_PREF_KEY_LIMIT_MAX, config.limitMax) > 0;
     persistMotors();
     return ok;
   }
@@ -925,6 +1017,40 @@ namespace StepperControl
     {
       config.autoSleep = patch.autoSleep;
     }
+
+    bool nextLimitsEnabled = config.limitsEnabled;
+    long nextLimitMin = config.limitMin;
+    long nextLimitMax = config.limitMax;
+
+    if (patch.hasLimitsEnabled)
+    {
+      nextLimitsEnabled = patch.limitsEnabled;
+    }
+
+    if (patch.hasLimitMin)
+    {
+      nextLimitMin = patch.limitMin;
+    }
+    if (patch.hasLimitMax)
+    {
+      nextLimitMax = patch.limitMax;
+    }
+
+    if (patch.hasLimitsEnabled && patch.limitsEnabled && !patch.hasLimitMin && !patch.hasLimitMax)
+    {
+      long halfSpan = roundToLong(static_cast<double>(config.stepsPerRev) / 2.0);
+      nextLimitMin = -halfSpan;
+      nextLimitMax = halfSpan;
+    }
+
+    if (nextLimitMin > nextLimitMax)
+    {
+      std::swap(nextLimitMin, nextLimitMax);
+    }
+
+    config.limitsEnabled = nextLimitsEnabled;
+    config.limitMin = nextLimitMin;
+    config.limitMax = nextLimitMax;
 
     applyMotionSettingsAll();
   }
