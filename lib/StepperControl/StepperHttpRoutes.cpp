@@ -305,6 +305,24 @@ void HttpRoutes::attach(AsyncWebServer &server)
   });
   server.addHandler(runHandler);
 
+  server.on("/api/settings/default/save", HTTP_POST, [this](AsyncWebServerRequest *request) {
+    if (!motion.saveDefaults())
+    {
+      sendError(request, 500, "Failed to save defaults");
+      return;
+    }
+    sendState(request);
+  });
+
+  server.on("/api/settings/default/restore", HTTP_POST, [this](AsyncWebServerRequest *request) {
+    if (!motion.restoreDefaults())
+    {
+      sendError(request, 500, "Failed to load defaults");
+      return;
+    }
+    sendState(request);
+  });
+
   server.on("/api/stop", HTTP_POST, [this](AsyncWebServerRequest *request) {
     motion.stop(true);
     if (motion.autoSleepEnabled())

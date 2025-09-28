@@ -30,6 +30,7 @@
           </label>
         </form>
         <div class="form-actions">
+          <button type="button" id="save-defaults">Save defaults</button>
           <button type="button" class="secondary" id="reset-default">Reset to default</button>
         </div>
         <div id="form-hint" class="hint"></div>
@@ -137,6 +138,7 @@
       const runButtons = [el("run-forward"), el("run-reverse"), el("run-pingpong")];
       const resetButton = el("reset-position");
       const resetDefaultsButton = el("reset-default");
+      const saveDefaultsButton = el("save-defaults");
       const autoSleepToggle = el("auto-sleep");
       let currentState = null;
       let pollTimer = null;
@@ -394,6 +396,24 @@
         return res.json();
       };
 
+      const sendRestoreDefaults = async () => {
+        const res = await fetch("/api/settings/default/restore", { method: "POST" });
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(text || res.statusText);
+        }
+        return res.json();
+      };
+
+      const sendSaveDefaults = async () => {
+        const res = await fetch("/api/settings/default/save", { method: "POST" });
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(text || res.statusText);
+        }
+        return res.json();
+      };
+
       const runWith = async (mode, direction) => {
         try {
           setHint(runHint, mode === "stop" ? "Stopping…" : "Command sent");
@@ -425,10 +445,31 @@
           setHint(runHint, err.message || "Failed", true);
         }
       });
-      resetDefaultsButton.addEventListener("click", () => {
+      resetDefaultsButton.addEventListener("click", async () => {
         settingsSaveToken += 1;
-        setHint(formHint, "");
-        fetchState(true);
+        try {
+          setHint(formHint, "Restoring defaults…");
+          const data = await sendRestoreDefaults();
+          renderState(data);
+          setHint(formHint, "Defaults restored");
+        } catch (err) {
+          setHint(formHint, err.message || "Failed to restore defaults", true);
+        }
+      });
+
+      saveDefaultsButton.addEventListener("click", async () => {
+        if (!window.confirm("Save current motion settings to ESP32 as default?")) {
+          return;
+        }
+        settingsSaveToken += 1;
+        try {
+          setHint(formHint, "Saving defaults…");
+          const data = await sendSaveDefaults();
+          renderState(data);
+          setHint(formHint, "Defaults saved");
+        } catch (err) {
+          setHint(formHint, err.message || "Failed to save defaults", true);
+        }
       });
 
       const sendDriver = async (awake) => {

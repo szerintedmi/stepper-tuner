@@ -1,5 +1,28 @@
 #include "StepperMotion.h"
 
+namespace
+{
+  constexpr int PIN_STEP = 12;
+  constexpr int PIN_DIR = 14;
+  constexpr int PIN_SLEEP = 27;
+
+  constexpr long DEFAULT_STEPS_PER_REV = 2038;
+  constexpr float DEFAULT_REVS = 1.0f;
+  constexpr float DEFAULT_MAX_SPEED = 800.0f;
+  constexpr float DEFAULT_ACCEL = 4000.0f;
+  constexpr float MAX_SPEED_LIMIT = 4000.0f;
+  constexpr float MAX_ACCEL = 30000.0f;
+  constexpr long MAX_STEPS_PER_REV = 200000;
+  constexpr unsigned long DRIVER_WAKE_DELAY_MS = 5;
+  constexpr unsigned long AUTO_SLEEP_DELAY_MS = 250;
+} // namespace
+
+#define STEPPER_PREF_NAMESPACE "motion"
+#define STEPPER_PREF_KEY_STEPS "steps"
+#define STEPPER_PREF_KEY_SPEED "speed"
+#define STEPPER_PREF_KEY_ACCEL "accel"
+#define STEPPER_PREF_KEY_SLEEP "sleep"
+
 namespace StepperControl
 {
 
@@ -45,6 +68,45 @@ float Motion::clampAcceleration(float value) const
     return MAX_ACCEL;
   }
   return value;
+}
+
+bool Motion::ensurePrefs()
+{
+  if (prefsOpen)
+  {
+    return true;
+  }
+  prefsOpen = prefs.begin(STEPPER_PREF_NAMESPACE, false);
+  if (!prefsOpen)
+  {
+    Serial.println("StepperControl: Preferences begin failed");
+  }
+  return prefsOpen;
+}
+
+void Motion::loadDefaults()
+{
+  config.maxSpeedLimit = MAX_SPEED_LIMIT;
+
+  long stepsPerRev = DEFAULT_STEPS_PER_REV;
+  float maxSpeed = DEFAULT_MAX_SPEED;
+  float acceleration = DEFAULT_ACCEL;
+  bool autoSleep = true;
+
+  if (ensurePrefs())
+  {
+    stepsPerRev = clampStepsPerRev(prefs.getLong(STEPPER_PREF_KEY_STEPS, stepsPerRev));
+    maxSpeed = clampMaxSpeed(prefs.getFloat(STEPPER_PREF_KEY_SPEED, maxSpeed));
+    acceleration = clampAcceleration(prefs.getFloat(STEPPER_PREF_KEY_ACCEL, acceleration));
+    autoSleep = prefs.getBool(STEPPER_PREF_KEY_SLEEP, autoSleep);
+  }
+
+  config.stepsPerRev = stepsPerRev;
+  config.maxSpeed = maxSpeed;
+  config.acceleration = acceleration;
+  config.autoSleep = autoSleep;
+
+  updateTarget(TargetUnits::Revs, DEFAULT_REVS);
 }
 
 Motion::TargetState Motion::computeTarget(TargetUnits units, double rawValue, long stepsPerRev) const
@@ -227,12 +289,7 @@ void Motion::continuePingPong()
 
 void Motion::begin()
 {
-  config.stepsPerRev = DEFAULT_STEPS_PER_REV;
-  config.maxSpeedLimit = MAX_SPEED_LIMIT;
-  config.maxSpeed = DEFAULT_MAX_SPEED;
-  config.acceleration = DEFAULT_ACCEL;
-  config.autoSleep = true;
-  updateTarget(TargetUnits::Revs, DEFAULT_REVS);
+  loadDefaults();
 
   engine.init();
   stepper = engine.stepperConnectToPin(PIN_STEP);
@@ -412,6 +469,29 @@ void Motion::reset()
   motion.segmentStartPos = 0;
   motion.segmentStartMs = millis();
   lastRun.valid = false;
+}
+
+bool Motion::saveDefaults()
+{
+  if (!ensurePrefs())
+  {
+    return false;
+  }
+
+  bool ok = true;
+  ok &= prefs.putLong(STEPPER_PREF_KEY_STEPS, config.stepsPerRev) > 0;
+  ok &= prefs.putFloat(STEPPER_PREF_KEY_SPEED, config.maxSpeed) > 0;
+  ok &= prefs.putFloat(STEPPER_PREF_KEY_ACCEL, config.acceleration) > 0;
+  ok &= prefs.putBool(STEPPER_PREF_KEY_SLEEP, config.autoSleep) > 0;
+  return ok;
+}
+
+bool Motion::restoreDefaults()
+{
+  stop(true);
+  loadDefaults();
+  applyMotionSettings();
+  return true;
 }
 
 void Motion::setDriverAwake(bool awake)

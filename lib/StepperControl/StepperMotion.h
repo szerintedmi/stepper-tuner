@@ -3,6 +3,7 @@
 #include <Arduino.h>
 
 #include <FastAccelStepper.h>
+#include <Preferences.h>
 
 namespace StepperControl
 {
@@ -94,6 +95,9 @@ public:
   void stop(bool aborted);
   void reset();
 
+  bool saveDefaults();
+  bool restoreDefaults();
+
   void setDriverAwake(bool awake);
   bool driverAwake() const { return driverAwakeFlag; }
   bool autoSleepEnabled() const { return config.autoSleep; }
@@ -143,22 +147,11 @@ private:
   FastAccelStepperEngine engine;
   FastAccelStepper *stepper = nullptr;
 
+  Preferences prefs;
+  bool prefsOpen = false;
+
   bool driverAwakeFlag = false;
   unsigned long autoSleepRequestMs = 0;
-
-  static constexpr int PIN_STEP = 12;
-  static constexpr int PIN_DIR = 14;
-  static constexpr int PIN_SLEEP = 27;
-
-  static constexpr long DEFAULT_STEPS_PER_REV = 2038;
-  static constexpr float DEFAULT_REVS = 1.0f;
-  static constexpr float DEFAULT_MAX_SPEED = 800.0f;
-  static constexpr float DEFAULT_ACCEL = 4000.0f;
-  static constexpr float MAX_SPEED_LIMIT = 4000.0f;
-  static constexpr float MAX_ACCEL = 30000.0f;
-  static constexpr long MAX_STEPS_PER_REV = 200000;
-  static constexpr unsigned long DRIVER_WAKE_DELAY_MS = 5;
-  static constexpr unsigned long AUTO_SLEEP_DELAY_MS = 250;
 
   static long roundToLong(double value);
 
@@ -176,7 +169,9 @@ private:
   bool ensureDriverAwake();
   bool beginMove(int direction);
   void continuePingPong();
+
+  bool ensurePrefs();
+  void loadDefaults();
 };
 
 } // namespace StepperControl
-
