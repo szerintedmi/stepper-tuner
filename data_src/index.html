@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Stepper Tuner</title>
     <link rel="stylesheet" href="/style.css" />
-<link rel="shortcut icon" href="/favicon.ico" type="image/x-icon" />
+    <link rel="shortcut icon" href="/favicon.ico" type="image/x-icon" />
     <link rel="icon" href="/favicon.ico" type="image/x-icon" />
   </head>
   <body>
@@ -15,6 +15,59 @@
     </header>
 
     <main class="cards">
+      <section class="card full">
+        <div class="card-header">
+          <h2>Motors</h2>
+          <button type="button" id="toggle-motor-editor" class="secondary compact">
+            Edit motors
+          </button>
+        </div>
+        <div id="run-hint" class="hint"></div>
+        <div class="table-scroll">
+          <table class="motors-table">
+            <thead>
+              <tr>
+                <th>Motor</th>
+                <th>Status</th>
+                <th>Pos</th>
+                <th>Target</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="motors-table-body">
+              <tr class="empty">
+                <td colspan="5">No motors configured. Use Edit motors to add one.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div id="motor-editor" class="motor-editor hidden">
+          <h3>Motor Editor</h3>
+          <div id="motor-edit-list" class="motor-edit-list"></div>
+
+          <h4>Add Motor</h4>
+          <div class="motor-add-grid">
+            <label>
+              Step pin
+              <input id="motor-editor-step" type="number" min="0" step="1" />
+            </label>
+            <label>
+              Dir pin
+              <input id="motor-editor-dir" type="number" min="0" step="1" />
+            </label>
+            <label>
+              Sleep pin
+              <input id="motor-editor-sleep" type="number" min="0" step="1" />
+            </label>
+          </div>
+          <div class="form-actions">
+            <button type="button" id="motor-editor-add">Add motor</button>
+          </div>
+          <div id="motor-editor-hint" class="hint"></div>
+        </div>
+      </section>
+
       <section class="card">
         <h2>Motion Settings</h2>
         <form id="settings-form" class="form-grid">
@@ -33,7 +86,9 @@
         </form>
         <div class="form-actions">
           <button type="button" id="save-defaults">Save defaults</button>
-          <button type="button" class="secondary" id="reset-default">Reset to default</button>
+          <button type="button" class="secondary" id="reset-default">
+            Reset to default
+          </button>
         </div>
         <div id="form-hint" class="hint"></div>
         <label class="toggle">
@@ -41,120 +96,40 @@
           <span>Auto sleep driver</span>
         </label>
       </section>
-
-      <section class="card">
-        <h2>Run Control</h2>
-        <label>
-          Target
-          <div class="input-row">
-            <input id="target-value" type="number" min="0" step="0.01" required />
-            <select id="target-units">
-              <option value="revs">Revs</option>
-              <option value="degrees">Degrees</option>
-              <option value="steps">Steps</option>
-            </select>
-          </div>
-        </label>
-        <div class="form-actions wrap">
-          <button type="button" id="run-forward">Run Forward</button>
-          <button type="button" id="run-reverse">Run Reverse</button>
-          <button type="button" id="run-pingpong">Ping-Pong</button>
-          <button type="button" class="secondary" id="reset-position">Reset Position</button>
-          <button type="button" class="secondary" id="driver-toggle">Sleep Driver</button>
-          <button type="button" class="secondary danger" id="run-stop">Stop</button>
-        </div>
-        <div id="run-hint" class="hint"></div>
-        <div id="driver-hint" class="hint"></div>
-      </section>
-
-      <section class="card">
-        <h2>Status</h2>
-        <div class="row">
-          <span class="label">Mode</span>
-          <span class="value" id="status-mode">—</span>
-        </div>
-        <div class="row">
-          <span class="label">Moving</span>
-          <span class="value">
-            <span id="status-dot" class="dot"></span>
-            <span id="status-moving">—</span>
-          </span>
-        </div>
-        <div class="row">
-          <span class="label">Driver</span>
-          <span class="value">
-            <span id="driver-dot" class="dot"></span>
-            <span id="driver-state">—</span>
-          </span>
-        </div>
-        <div class="row">
-          <span class="label">Direction</span>
-          <span class="value" id="status-direction">—</span>
-        </div>
-        <div class="row">
-          <span class="label">Segment (steps)</span>
-          <span class="value mono" id="status-segment">—</span>
-        </div>
-        <div class="row">
-          <span class="label">Position</span>
-          <span class="value mono" id="status-position">—</span>
-        </div>
-        <div class="row">
-          <span class="label">Target</span>
-          <span class="value mono" id="status-target">—</span>
-        </div>
-        <div class="row">
-          <span class="label">Distance</span>
-          <span class="value mono" id="status-distance">—</span>
-        </div>
-        <div class="row">
-          <span class="label">Speed</span>
-          <span class="value mono" id="status-speed">—</span>
-        </div>
-      </section>
     </main>
 
     <script>
       const el = (id) => document.getElementById(id);
+
       const stepsInput = el("steps-per-rev");
-      const targetInput = el("target-value");
-      const targetUnits = el("target-units");
       const maxSpeedInput = el("max-speed");
       const accelInput = el("acceleration");
+      const autoSleepToggle = el("auto-sleep");
       const formHint = el("form-hint");
       const runHint = el("run-hint");
-      const driverHint = el("driver-hint");
       const updatedEl = el("updated");
-      const statusMode = el("status-mode");
-      const statusMoving = el("status-moving");
-      const statusDot = el("status-dot");
-      const driverDot = el("driver-dot");
-      const driverState = el("driver-state");
-      const statusDirection = el("status-direction");
-      const statusSegment = el("status-segment");
-      const statusPosition = el("status-position");
-      const statusTarget = el("status-target");
-      const statusDistance = el("status-distance");
-      const statusSpeed = el("status-speed");
-      const driverButton = el("driver-toggle");
-      const runButtons = [el("run-forward"), el("run-reverse"), el("run-pingpong")];
-      const resetButton = el("reset-position");
-      const resetDefaultsButton = el("reset-default");
       const saveDefaultsButton = el("save-defaults");
-      const autoSleepToggle = el("auto-sleep");
-      let currentState = null;
-      let pollTimer = null;
-      let lastRunStartSeen = null;
-      let settingsSaveToken = 0;
+      const resetDefaultsButton = el("reset-default");
+      const toggleMotorEditorBtn = el("toggle-motor-editor");
+      const motorEditor = el("motor-editor");
+      const motorEditList = el("motor-edit-list");
+      const motorEditorHint = el("motor-editor-hint");
+      const motorEditorStep = el("motor-editor-step");
+      const motorEditorDir = el("motor-editor-dir");
+      const motorEditorSleep = el("motor-editor-sleep");
+      const motorEditorAddBtn = el("motor-editor-add");
+      const motorsTableBody = el("motors-table-body");
 
-      const numberOrNull = (value) => (typeof value === "number" && !Number.isNaN(value) ? value : null);
+      const motorTargets = new Map();
+      let defaultTarget = { units: "revs", value: 0 };
+      let defaultTargetValues = { revs: 0, degrees: 0, steps: 0 };
+      let editingTarget = false;
+
+      const numberOrNull = (value) =>
+        typeof value === "number" && !Number.isNaN(value) ? value : null;
       const formatInt = (value) => {
         const num = numberOrNull(value);
         return num === null ? "—" : Math.round(num).toString();
-      };
-      const formatFloat = (value, decimals = 2) => {
-        const num = numberOrNull(value);
-        return num === null ? "—" : num.toFixed(decimals);
       };
       const setInputValue = (input, value) => {
         if (document.activeElement === input) return;
@@ -167,10 +142,6 @@
       const setHint = (node, text, isError = false) => {
         node.textContent = text || "";
         node.classList.toggle("error", !!isError);
-      };
-      const setDot = (node, on) => {
-        node.classList.toggle("ok", !!on);
-        node.classList.toggle("bad", !on);
       };
 
       const unitMeta = {
@@ -185,44 +156,133 @@
         return "revs";
       };
 
-      const applyUnitMeta = (units) => {
+      const applyUnitMeta = (input, units) => {
         const meta = unitMeta[units] || unitMeta.revs;
-        targetInput.step = meta.step;
-        targetInput.min = meta.min;
-        targetInput.placeholder = units;
+        input.step = meta.step;
+        input.min = meta.min;
+        input.placeholder = units;
       };
 
-      const renderState = (data) => {
-        currentState = data;
-        const settings = data?.settings || {};
-        const status = data?.status || {};
-        const units = normalizeUnits(settings.targetUnits || targetUnits.value || "revs");
-        const awake = status.driverAwake !== false;
-        const autoSleepEnabled = settings.autoSleep !== false;
+      const formatTargetDisplay = (units, value) => {
+        const num = numberOrNull(value);
+        if (num === null) return "";
+        if (units === "steps") return Math.round(num).toString();
+        if (units === "degrees") return num.toFixed(1);
+        return num.toFixed(3);
+      };
 
-        applyUnitMeta(units);
-        targetUnits.value = units;
+      const clampTargetValue = (units, rawValue) => {
+        const meta = unitMeta[units] || unitMeta.revs;
+        const parsed = Number.parseFloat(rawValue);
+        if (!Number.isFinite(parsed)) {
+          return null;
+        }
+        const value = Math.max(meta.min, parsed);
+        if (units === "steps") {
+          return Math.round(value);
+        }
+        if (units === "degrees") {
+          return Math.round(value * 10) / 10;
+        }
+        return value;
+      };
+
+      const convertTargetValue = (value, fromUnits, toUnits, stepsPerRev) => {
+        if (!Number.isFinite(value) || fromUnits === toUnits) {
+          return value;
+        }
+        const spr = Number.isFinite(stepsPerRev) && stepsPerRev > 0 ? stepsPerRev : null;
+        if (!spr) {
+          return value;
+        }
+        let stepsValue = value;
+        if (fromUnits === "degrees") {
+          stepsValue = (value / 360) * spr;
+        } else if (fromUnits === "revs") {
+          stepsValue = value * spr;
+        }
+        if (toUnits === "steps") {
+          return stepsValue;
+        }
+        if (toUnits === "degrees") {
+          return (stepsValue * 360) / spr;
+        }
+        return stepsValue / spr;
+      };
+
+
+      const lastRunStartSeen = new Map();
+      let currentState = null;
+      let pollTimer = null;
+      let settingsSaveToken = 0;
+
+      const renderSettings = (settings) => {
+        const stepsPerRev = numberOrNull(settings.stepsPerRev);
+        const targetSteps = numberOrNull(settings.targetSteps);
+        const targetRevs = numberOrNull(settings.targetRevs);
+        const targetDegrees = numberOrNull(settings.targetDegrees);
+
+        let stepsValue = targetSteps;
+        if (stepsValue === null && targetRevs !== null && stepsPerRev) {
+          stepsValue = Math.round(targetRevs * stepsPerRev);
+        } else if (stepsValue === null && targetDegrees !== null && stepsPerRev) {
+          stepsValue = Math.round((targetDegrees / 360) * stepsPerRev);
+        }
+
+        let revsValue = targetRevs;
+        if (revsValue === null && stepsValue !== null && stepsPerRev) {
+          revsValue = stepsValue / stepsPerRev;
+        } else if (revsValue === null && targetDegrees !== null) {
+          revsValue = targetDegrees / 360;
+        }
+
+        let degreesValue = targetDegrees;
+        if (degreesValue === null && stepsValue !== null && stepsPerRev) {
+          degreesValue = (stepsValue * 360) / stepsPerRev;
+        } else if (degreesValue === null && revsValue !== null) {
+          degreesValue = revsValue * 360;
+        }
+
+        defaultTargetValues = {
+          steps: stepsValue ?? 0,
+          revs: revsValue ?? 0,
+          degrees: degreesValue ?? 0,
+        };
+
+        const targetUnits = normalizeUnits(settings.targetUnits);
+        defaultTarget = {
+          units: targetUnits,
+          value: defaultTargetValues[targetUnits] ?? 0,
+        };
+
+        motorTargets.forEach((entry, key) => {
+          if (entry && entry.dirty) {
+            return;
+          }
+          const units = entry ? normalizeUnits(entry.units) : targetUnits;
+          const display = formatTargetDisplay(
+            units,
+            defaultTargetValues[units] ?? 0
+          );
+          motorTargets.set(key, {
+            units,
+            value: display,
+            dirty: false,
+          });
+        });
 
         setInputValue(stepsInput, settings.stepsPerRev ?? "");
-        let targetVal;
-        if (units === "steps") {
-          targetVal = settings.targetSteps;
-        } else if (units === "degrees") {
-          targetVal = settings.targetDegrees;
-        } else {
-          targetVal = settings.targetRevs;
-        }
-        if (targetVal !== undefined) {
-          const formatted =
-            units === "steps"
-              ? Math.round(targetVal)
-              : units === "degrees"
-              ? Number(targetVal).toFixed(1)
-              : Number(targetVal).toFixed(3);
-          setInputValue(targetInput, formatted);
-        }
-        setInputValue(maxSpeedInput, settings.maxSpeed !== undefined ? Math.round(settings.maxSpeed) : "");
-        setInputValue(accelInput, settings.acceleration !== undefined ? Math.round(settings.acceleration) : "");
+        setInputValue(
+          maxSpeedInput,
+          settings.maxSpeed !== undefined ? Math.round(settings.maxSpeed) : ""
+        );
+        setInputValue(
+          accelInput,
+          settings.acceleration !== undefined
+            ? Math.round(settings.acceleration)
+            : ""
+        );
+
         if (settings.maxSpeedLimit) {
           const limit = Math.round(settings.maxSpeedLimit);
           maxSpeedInput.max = limit;
@@ -234,54 +294,352 @@
           maxSpeedInput.removeAttribute("max");
           maxSpeedInput.removeAttribute("title");
         }
-        autoSleepToggle.checked = autoSleepEnabled;
 
-        const moving = !!status.moving;
-        statusMode.textContent = (status.mode || "idle").toUpperCase();
-        statusMoving.textContent = moving ? "Running" : "Idle";
-        setDot(statusDot, moving);
-        setDot(driverDot, awake);
-        driverState.textContent = awake ? "Awake" : "Sleeping";
-        driverButton.textContent = awake ? "Sleep Driver" : "Wake Driver";
-        driverButton.classList.toggle("danger", awake);
-        runButtons.forEach((btn) => {
-          btn.disabled = !autoSleepEnabled && !awake;
+        autoSleepToggle.checked = settings.autoSleep !== false;
+      };
+
+      const createDot = (on) => {
+        const dot = document.createElement("span");
+        dot.className = `dot ${on ? "ok" : "bad"}`;
+        return dot;
+      };
+
+      const createActionButton = (
+        label,
+        action,
+        motorId,
+        disabled = false,
+        classes = []
+      ) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.dataset.action = action;
+        button.dataset.motorId = String(motorId);
+        button.textContent = label;
+        button.disabled = disabled;
+        ["compact", ...classes].forEach((cls) => button.classList.add(cls));
+        return button;
+      };
+
+      const createStatusChip = (on, label) => {
+        const chip = document.createElement("span");
+        chip.className = "status-chip";
+        chip.append(createDot(on), document.createTextNode(label));
+        return chip;
+      };
+
+      const renderMotorsTable = (motors, settings) => {
+        if (editingTarget) {
+          return;
+        }
+        const activeElement = document.activeElement;
+        const isTargetInput =
+          activeElement && activeElement.classList.contains("motor-target-input");
+        const isTargetSelect =
+          activeElement && activeElement.classList.contains("motor-target-units");
+        const activeTarget = isTargetInput || isTargetSelect
+          ? {
+              motorId: activeElement.dataset.motorId || null,
+              type: isTargetInput ? "input" : "select",
+              selectionStart: isTargetInput ? activeElement.selectionStart : null,
+              selectionEnd: isTargetInput ? activeElement.selectionEnd : null,
+            }
+          : null;
+
+        const fragment = document.createDocumentFragment();
+        const autoSleepEnabled = settings.autoSleep !== false;
+        const seen = new Set();
+        let lastRunMessage = null;
+
+        if (!motors.length) {
+          motorsTableBody.innerHTML =
+            '<tr class="empty"><td colspan="5">No motors configured. Use Edit motors to add one.</td></tr>';
+          lastRunStartSeen.clear();
+          motorTargets.clear();
+          if (!runHint.textContent) {
+            setHint(runHint, "No motors configured. Use Edit motors to add one.");
+          }
+          return;
+        }
+
+        motors.forEach((motor) => {
+          const motorId = String(motor.id);
+          seen.add(motorId);
+          const tr = document.createElement("tr");
+          tr.dataset.motorId = motorId;
+
+          const modeRaw = (motor.mode || "idle").toString().toLowerCase();
+          const moving = !!motor.moving;
+          const driverAwake = motor.driverAwake !== false;
+          const canRun = modeRaw === "idle" && (autoSleepEnabled || driverAwake);
+          const canStop = modeRaw !== "idle" || moving;
+
+          const motorCell = document.createElement("td");
+          motorCell.className = "motor-cell";
+          const pinsLabel = `Pins – step: ${motor.pins.step} dir: ${motor.pins.dir} sleep: ${motor.pins.sleep}`;
+          const motorName = document.createElement("div");
+          motorName.className = "motor-name";
+          motorName.textContent = `Motor ${motor.id}`;
+          const motorPins = document.createElement("span");
+          motorPins.className = "motor-pin-icon";
+          motorPins.dataset.tooltip = pinsLabel;
+          motorPins.setAttribute("aria-label", `Pins for motor ${motor.id}`);
+          motorPins.textContent = "ⓘ";
+          const motorHeader = document.createElement("div");
+          motorHeader.className = "motor-header";
+          motorHeader.append(motorName, motorPins);
+          motorCell.append(motorHeader);
+          tr.append(motorCell);
+
+          const statusCell = document.createElement("td");
+          statusCell.className = "motor-status";
+          statusCell.append(
+            createStatusChip(moving, moving ? "Running" : "Idle"),
+            createStatusChip(
+              driverAwake,
+              driverAwake ? "Driver awake" : "Driver sleeping"
+            )
+          );
+          tr.append(statusCell);
+
+          const positionCell = document.createElement("td");
+          positionCell.className = "motor-position";
+          positionCell.textContent = formatInt(motor.currentPosition);
+          tr.append(positionCell);
+
+          const targetCell = document.createElement("td");
+          targetCell.className = "motor-target-cell";
+          const targetWrap = document.createElement("div");
+          targetWrap.className = "motor-target";
+          const storedTarget = motorTargets.get(motor.id);
+          const targetUnits = normalizeUnits(
+            storedTarget?.units || defaultTarget.units
+          );
+          const fallbackDisplay = formatTargetDisplay(
+            targetUnits,
+            defaultTargetValues[targetUnits] ?? 0
+          );
+          const initialDirty = storedTarget?.dirty ?? false;
+          const initialValue = initialDirty
+            ? storedTarget?.value ?? ""
+            : fallbackDisplay;
+          const targetInput = document.createElement("input");
+          targetInput.type = "number";
+          targetInput.className = "motor-target-input";
+          targetInput.dataset.motorId = motorId;
+          applyUnitMeta(targetInput, targetUnits);
+          setInputValue(targetInput, initialValue);
+
+          const unitsSelect = document.createElement("select");
+          unitsSelect.className = "motor-target-units";
+          unitsSelect.dataset.motorId = motorId;
+          [
+            { value: "revs", label: "Revs" },
+            { value: "degrees", label: "Degrees" },
+            { value: "steps", label: "Steps" },
+          ].forEach(({ value, label }) => {
+            const option = document.createElement("option");
+            option.value = value;
+            option.textContent = label;
+            unitsSelect.append(option);
+          });
+          unitsSelect.value = targetUnits;
+
+          const persistTarget = (units, value, dirty) => {
+            motorTargets.set(motor.id, {
+              units,
+              value,
+              dirty,
+            });
+          };
+
+          persistTarget(targetUnits, targetInput.value, initialDirty);
+
+          targetInput.addEventListener("focus", () => {
+            editingTarget = true;
+          });
+          targetInput.addEventListener("blur", () => {
+            editingTarget = false;
+          });
+          targetInput.addEventListener("input", () => {
+            persistTarget(unitsSelect.value, targetInput.value, true);
+          });
+          targetInput.addEventListener("change", () => {
+            const units = normalizeUnits(unitsSelect.value);
+            const normalized = clampTargetValue(units, targetInput.value);
+            if (normalized === null) {
+              persistTarget(units, targetInput.value, true);
+              return;
+            }
+            const display = formatTargetDisplay(units, normalized);
+            setInputValue(targetInput, display);
+            persistTarget(units, display, true);
+          });
+
+          unitsSelect.addEventListener("focus", () => {
+            editingTarget = true;
+          });
+          unitsSelect.addEventListener("blur", () => {
+            editingTarget = false;
+          });
+          unitsSelect.addEventListener("change", () => {
+            const units = normalizeUnits(unitsSelect.value);
+            const entry = motorTargets.get(motor.id);
+            const previousUnits = normalizeUnits(entry?.units || targetUnits);
+            const stepsPerRev = numberOrNull(settings.stepsPerRev);
+            const currentValue = clampTargetValue(previousUnits, targetInput.value);
+            const converted =
+              currentValue === null
+                ? null
+                : convertTargetValue(currentValue, previousUnits, units, stepsPerRev);
+            applyUnitMeta(targetInput, units);
+            const display =
+              converted === null ? "" : formatTargetDisplay(units, converted);
+            targetInput.value = display;
+            persistTarget(units, display, true);
+          });
+
+          targetWrap.append(targetInput, unitsSelect);
+          targetCell.append(targetWrap);
+          tr.append(targetCell);
+
+          const actionsCell = document.createElement("td");
+          actionsCell.className = "actions";
+          const actionsWrap = document.createElement("div");
+          actionsWrap.className = "motor-actions";
+          actionsWrap.append(
+            createActionButton("Forward", "run-forward", motor.id, !canRun),
+            createActionButton("Reverse", "run-reverse", motor.id, !canRun),
+            createActionButton("Ping-Pong", "run-pingpong", motor.id, !canRun, ["secondary"]),
+            createActionButton("Stop", "stop", motor.id, !canStop, ["secondary", "danger"]),
+            createActionButton(
+              driverAwake ? "Sleep" : "Wake",
+              "toggle-driver",
+              motor.id,
+              false,
+              ["secondary"]
+            ),
+            createActionButton("Reset", "reset", motor.id, false, ["secondary"])
+          );
+          actionsCell.append(actionsWrap);
+          tr.append(actionsCell);
+
+          const lastRun = motor.lastRun || {};
+          if (lastRun.valid && typeof lastRun.startMs === "number") {
+            const key = motorId;
+            if (lastRunStartSeen.get(key) !== lastRun.startMs) {
+              const durationSec = (Number(lastRun.durationMs) || 0) / 1000;
+              const stepsDone = Math.abs(Number(lastRun.steps) || 0);
+              const gapUs = Number(lastRun.loopMaxGapUs) || 0;
+              const gapText = gapUs > 0 ? ` gap ${(gapUs / 1000).toFixed(3)}ms` : "";
+              const prefix = lastRun.aborted ? "Aborted" : "Finished";
+              lastRunMessage = `Motor ${motor.id}: ${prefix} · steps ${Math.round(stepsDone)} · time ${durationSec.toFixed(2)}s${gapText}`;
+              lastRunStartSeen.set(key, lastRun.startMs);
+            }
+          }
+
+          fragment.append(tr);
         });
-        const hintParts = [];
-        if (!awake) {
-          hintParts.push(autoSleepEnabled ? "Sleeping (wakes on run)" : "Driver sleeping");
-        }
-        hintParts.push(autoSleepEnabled ? "Auto sleep on" : "Auto sleep off");
-        setHint(driverHint, hintParts.join(" · "));
-        statusDirection.textContent = (status.direction ?? 1) >= 0 ? "Forward" : "Reverse";
-        statusSegment.textContent = formatInt(status.segmentSteps);
-        statusPosition.textContent = formatInt(status.currentPosition);
-        statusTarget.textContent = formatInt(status.targetPosition);
-        statusDistance.textContent = formatInt(status.distanceToGo);
-        statusSpeed.textContent = formatFloat(status.speed, 1);
-        updatedEl.textContent = `Updated ${new Date().toLocaleTimeString()}`;
 
-        if (status.mode === "single" && moving) {
-          setHint(runHint, "Running…");
-        }
+        motorsTableBody.replaceChildren(fragment);
 
-        const lastRun = status.lastRun || {};
-        if (lastRun.valid && typeof lastRun.startMs === "number") {
-          if (lastRun.startMs !== lastRunStartSeen) {
-            const durationSec = (Number(lastRun.durationMs) || 0) / 1000;
-            const stepsDone = Number(lastRun.steps) || 0;
-            const speedSet = settings.maxSpeed !== undefined ? Math.round(settings.maxSpeed) : 0;
-            const accelSet = settings.acceleration !== undefined ? Math.round(settings.acceleration) : 0;
-            const gapUs = Number(lastRun.loopMaxGapUs) || 0;
-            const gapText = gapUs > 0 ? ` gap: ${(gapUs / 1000).toFixed(3)}ms` : "";
-            const prefix = lastRun.aborted ? "Aborted" : "Finished";
-            setHint(
-              runHint,
-              `${prefix} · steps: ${Math.round(Math.abs(stepsDone))} speed: ${speedSet} accel: ${accelSet} time: ${durationSec.toFixed(2)}s${gapText}`,
-            );
-            lastRunStartSeen = lastRun.startMs;
+        if (activeTarget && activeTarget.motorId) {
+          const selector =
+            activeTarget.type === "select"
+              ? `select.motor-target-units[data-motor-id="${activeTarget.motorId}"]`
+              : `input.motor-target-input[data-motor-id="${activeTarget.motorId}"]`;
+          const nextEl = motorsTableBody.querySelector(selector);
+          if (nextEl) {
+            nextEl.focus();
+            if (
+              activeTarget.type === "input" &&
+              activeTarget.selectionStart !== null &&
+              activeTarget.selectionEnd !== null &&
+              nextEl.setSelectionRange
+            ) {
+              try {
+                nextEl.setSelectionRange(
+                  activeTarget.selectionStart,
+                  activeTarget.selectionEnd
+                );
+              } catch (err) {
+                /* ignore */
+              }
+            }
           }
         }
+
+        Array.from(lastRunStartSeen.keys()).forEach((key) => {
+          if (!seen.has(key)) {
+            lastRunStartSeen.delete(key);
+          }
+        });
+        Array.from(motorTargets.keys()).forEach((key) => {
+          if (!seen.has(String(key))) {
+            motorTargets.delete(key);
+          }
+        });
+
+        if (lastRunMessage) {
+          setHint(runHint, lastRunMessage);
+        }
+      };
+
+      const renderMotorEditor = (motors) => {
+        if (motorEditor.classList.contains("hidden")) {
+          return;
+        }
+
+        if (!motors.length) {
+          motorEditList.innerHTML =
+            '<p class="hint">No motors yet. Add a new motor below.</p>';
+          return;
+        }
+
+        motorEditList.innerHTML = motors
+          .map((motor) => {
+            const step = Number(motor.pins.step ?? "");
+            const dir = Number(motor.pins.dir ?? "");
+            const sleep = Number(motor.pins.sleep ?? "");
+            return `
+              <div class="motor-edit" data-motor="${motor.id}">
+                <h4>Motor ${motor.id}</h4>
+                <div class="motor-edit-grid">
+                  <label>
+                    Step pin
+                    <input type="number" min="0" step="1" data-field="step" value="${step}" />
+                  </label>
+                  <label>
+                    Dir pin
+                    <input type="number" min="0" step="1" data-field="dir" value="${dir}" />
+                  </label>
+                  <label>
+                    Sleep pin
+                    <input type="number" min="0" step="1" data-field="sleep" value="${sleep}" />
+                  </label>
+                </div>
+                <div class="form-actions">
+                  <button type="button" class="compact" data-action="save" data-motor-id="${motor.id}">Update</button>
+                  <button type="button" class="secondary danger compact" data-action="remove" data-motor-id="${motor.id}">Remove</button>
+                </div>
+              </div>
+            `;
+          })
+          .join("");
+      };
+
+      const renderState = (data) => {
+        currentState = data;
+        const settings = data?.settings || {};
+        const motors = Array.isArray(data?.motors) ? data.motors : [];
+
+        renderSettings(settings);
+        renderMotorsTable(motors, settings);
+        if (!motorEditor.classList.contains("hidden")) {
+          renderMotorEditor(motors);
+        }
+
+        updatedEl.textContent = `Updated ${new Date().toLocaleTimeString()}`;
       };
 
       const fetchState = async (showErrors = false) => {
@@ -312,18 +670,12 @@
       };
 
       const collectSettingsFromInputs = () => {
-        const units = normalizeUnits(targetUnits.value);
         const stepsPerRev = Number.parseInt(stepsInput.value, 10);
-        const targetValueRaw = Number.parseFloat(targetInput.value);
         const maxSpeed = Number.parseFloat(maxSpeedInput.value);
         const acceleration = Number.parseFloat(accelInput.value);
 
         if (!Number.isFinite(stepsPerRev) || stepsPerRev < 1) {
           setHint(formHint, "Steps per rev must be at least 1", true);
-          return null;
-        }
-        if (!Number.isFinite(targetValueRaw) || targetValueRaw < 0) {
-          setHint(formHint, "Target must be zero or positive", true);
           return null;
         }
         if (!Number.isFinite(maxSpeed) || maxSpeed < 1) {
@@ -337,13 +689,6 @@
 
         return {
           stepsPerRev,
-          targetUnits: units,
-          targetValue:
-            units === "steps"
-              ? Math.max(1, Math.round(targetValueRaw))
-              : units === "degrees"
-              ? Math.max(0, Math.round(targetValueRaw * 10) / 10)
-              : targetValueRaw,
           maxSpeed,
           acceleration,
         };
@@ -370,17 +715,17 @@
         }
       };
 
-      [stepsInput, targetInput, maxSpeedInput, accelInput].forEach((input) => {
+      [stepsInput, maxSpeedInput, accelInput].forEach((input) => {
         input.addEventListener("change", () => {
           void saveSettingsFromInputs();
         });
       });
 
-      const sendRun = async (payload) => {
+      const sendRun = async (motorId, mode, direction) => {
         const res = await fetch("/api/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
+          body: JSON.stringify({ motorId, mode, direction }),
         });
         if (!res.ok) {
           const text = await res.text();
@@ -389,8 +734,38 @@
         return res.json();
       };
 
-      const sendReset = async () => {
-        const res = await fetch("/api/reset", { method: "POST" });
+      const sendStop = async (motorId) => {
+        const res = await fetch("/api/stop", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ motorId }),
+        });
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(text || res.statusText);
+        }
+        return res.json();
+      };
+
+      const sendReset = async (motorId) => {
+        const res = await fetch("/api/reset", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ motorId }),
+        });
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(text || res.statusText);
+        }
+        return res.json();
+      };
+
+      const sendDriver = async (motorId, awake) => {
+        const res = await fetch("/api/driver", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ motorId, awake }),
+        });
         if (!res.ok) {
           const text = await res.text();
           throw new Error(text || res.statusText);
@@ -416,37 +791,230 @@
         return res.json();
       };
 
-      const runWith = async (mode, direction) => {
-        try {
-          setHint(runHint, mode === "stop" ? "Stopping…" : "Command sent");
-          const data = await sendRun({ mode, direction });
-          renderState(data);
-          if (mode === "stop") {
-            setHint(runHint, "Stopped");
-          } else if (mode === "single") {
-            setHint(runHint, "Running");
-          } else if (mode === "pingpong") {
-            setHint(runHint, "Ping-pong running");
-          }
-        } catch (err) {
-          setHint(runHint, err.message || "Failed", true);
+      const sendMotorAdd = async (pins) => {
+        const res = await fetch("/api/motors/add", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(pins),
+        });
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(text || res.statusText);
         }
+        return res.json();
       };
 
-      el("run-forward").addEventListener("click", () => runWith("single", 1));
-      el("run-reverse").addEventListener("click", () => runWith("single", -1));
-      el("run-pingpong").addEventListener("click", () => runWith("pingpong", 1));
-      el("run-stop").addEventListener("click", () => runWith("stop", 0));
-      resetButton.addEventListener("click", async () => {
+      const sendMotorUpdate = async (motorId, pins) => {
+        const res = await fetch("/api/motors/update", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ motorId, ...pins }),
+        });
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(text || res.statusText);
+        }
+        return res.json();
+      };
+
+      const sendMotorRemove = async (motorId) => {
+        const res = await fetch("/api/motors/remove", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ motorId }),
+        });
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(text || res.statusText);
+        }
+        return res.json();
+      };
+
+      const targetApproximatelyEqual = (units, a, b) => {
+        if (!Number.isFinite(a) || !Number.isFinite(b)) {
+          return false;
+        }
+        if (units === "steps") {
+          return Math.round(a) === Math.round(b);
+        }
+        if (units === "degrees") {
+          return Math.abs(a - b) <= 0.05;
+        }
+        return Math.abs(a - b) <= 0.0005;
+      };
+
+      const ensureTargetForMotor = async (motorId) => {
+        const entry = motorTargets.get(motorId);
+        const units = normalizeUnits(entry?.units || defaultTarget.units);
+        const fallbackDisplay = formatTargetDisplay(
+          units,
+          defaultTargetValues[units] ?? 0
+        );
+        const rawValue =
+          entry && entry.value !== undefined && entry.value !== null && entry.value !== ""
+            ? entry.value
+            : fallbackDisplay;
+        const normalized = clampTargetValue(units, rawValue);
+        if (normalized === null) {
+          throw new Error("Enter a valid target before running");
+        }
+
+        const currentUnits = normalizeUnits(currentState?.settings?.targetUnits);
+        const currentValue = defaultTargetValues[units];
+        if (
+          currentUnits === units &&
+          currentValue !== undefined &&
+          targetApproximatelyEqual(units, currentValue, normalized)
+        ) {
+          return currentState;
+        }
+
+        const payload = { targetUnits: units, targetValue: normalized };
+        const data = await sendSettings(payload);
+        const display = formatTargetDisplay(units, normalized);
+        motorTargets.set(motorId, { units, value: display, dirty: true });
+        renderState(data);
+        return data;
+      };
+
+      motorsTableBody.addEventListener("click", async (event) => {
+        const button = event.target.closest("button[data-action]");
+        if (!button) return;
+        const motorId = Number.parseInt(button.dataset.motorId || "", 10);
+        if (!Number.isInteger(motorId)) return;
+        const action = button.dataset.action;
+
         try {
-          setHint(runHint, "Resetting…");
-          const data = await sendReset();
-          renderState(data);
-          setHint(runHint, "Position reset");
+          if (action === "run-forward") {
+            await ensureTargetForMotor(motorId);
+            setHint(runHint, `Motor ${motorId}: starting forward…`);
+            const data = await sendRun(motorId, "single", 1);
+            renderState(data);
+            setHint(runHint, `Motor ${motorId}: running forward`);
+          } else if (action === "run-reverse") {
+            await ensureTargetForMotor(motorId);
+            setHint(runHint, `Motor ${motorId}: starting reverse…`);
+            const data = await sendRun(motorId, "single", -1);
+            renderState(data);
+            setHint(runHint, `Motor ${motorId}: running reverse`);
+          } else if (action === "run-pingpong") {
+            await ensureTargetForMotor(motorId);
+            setHint(runHint, `Motor ${motorId}: starting ping-pong…`);
+            const data = await sendRun(motorId, "pingpong", 1);
+            renderState(data);
+            setHint(runHint, `Motor ${motorId}: ping-pong running`);
+          } else if (action === "stop") {
+            setHint(runHint, `Motor ${motorId}: stopping…`);
+            const data = await sendStop(motorId);
+            renderState(data);
+            setHint(runHint, `Motor ${motorId}: stop requested`);
+          } else if (action === "reset") {
+            setHint(runHint, `Motor ${motorId}: resetting…`);
+            const data = await sendReset(motorId);
+            renderState(data);
+            setHint(runHint, `Motor ${motorId}: position reset`);
+          } else if (action === "toggle-driver") {
+            const motor = (currentState?.motors || []).find((m) => m.id === motorId);
+            const driverAwake = motor ? motor.driverAwake !== false : false;
+            setHint(runHint, `Motor ${motorId}: ${driverAwake ? "sleeping" : "waking"} driver…`);
+            const data = await sendDriver(motorId, !driverAwake);
+            renderState(data);
+            setHint(runHint, `Motor ${motorId}: driver ${driverAwake ? "sleep" : "awake"}`);
+          }
         } catch (err) {
-          setHint(runHint, err.message || "Failed", true);
+          setHint(runHint, err.message || "Command failed", true);
         }
       });
+
+      toggleMotorEditorBtn.addEventListener("click", () => {
+        const willShow = motorEditor.classList.contains("hidden");
+        motorEditor.classList.toggle("hidden");
+        toggleMotorEditorBtn.textContent = willShow ? "Hide editor" : "Edit motors";
+        if (willShow) {
+          renderMotorEditor(currentState?.motors || []);
+          setHint(motorEditorHint, "");
+        }
+      });
+
+      const parsePinInput = (input) => {
+        const value = Number.parseInt(input.value, 10);
+        return Number.isFinite(value) ? value : null;
+      };
+
+      motorEditorAddBtn.addEventListener("click", async () => {
+        const step = parsePinInput(motorEditorStep);
+        const dir = parsePinInput(motorEditorDir);
+        const sleep = parsePinInput(motorEditorSleep);
+        if (!Number.isInteger(step) || !Number.isInteger(dir) || !Number.isInteger(sleep)) {
+          setHint(motorEditorHint, "Enter valid pins for new motor", true);
+          return;
+        }
+        try {
+          setHint(motorEditorHint, "Adding motor…");
+          const data = await sendMotorAdd({ step, dir, sleep });
+          renderState(data);
+          motorEditorStep.value = "";
+          motorEditorDir.value = "";
+          motorEditorSleep.value = "";
+          setHint(motorEditorHint, "Motor added");
+        } catch (err) {
+          setHint(motorEditorHint, err.message || "Failed to add motor", true);
+        }
+      });
+
+      motorEditList.addEventListener("click", async (event) => {
+        const button = event.target.closest("button[data-action]");
+        if (!button) return;
+        const motorId = Number.parseInt(button.dataset.motorId || "", 10);
+        if (!Number.isInteger(motorId)) return;
+        const container = button.closest(".motor-edit");
+        if (!container) return;
+
+        const readPins = () => {
+          const step = Number.parseInt(
+            container.querySelector("input[data-field='step']").value,
+            10
+          );
+          const dir = Number.parseInt(
+            container.querySelector("input[data-field='dir']").value,
+            10
+          );
+          const sleep = Number.parseInt(
+            container.querySelector("input[data-field='sleep']").value,
+            10
+          );
+          return { step, dir, sleep };
+        };
+
+        try {
+          if (button.dataset.action === "save") {
+            const pins = readPins();
+            if (
+              !Number.isInteger(pins.step) ||
+              !Number.isInteger(pins.dir) ||
+              !Number.isInteger(pins.sleep)
+            ) {
+              setHint(motorEditorHint, "Enter valid pins", true);
+              return;
+            }
+            setHint(motorEditorHint, `Updating motor ${motorId}…`);
+            const data = await sendMotorUpdate(motorId, pins);
+            renderState(data);
+            setHint(motorEditorHint, `Motor ${motorId} updated`);
+          } else if (button.dataset.action === "remove") {
+            if (!window.confirm(`Remove motor ${motorId}?`)) {
+              return;
+            }
+            setHint(motorEditorHint, `Removing motor ${motorId}…`);
+            const data = await sendMotorRemove(motorId);
+            renderState(data);
+            setHint(motorEditorHint, `Motor ${motorId} removed`);
+          }
+        } catch (err) {
+          setHint(motorEditorHint, err.message || "Motor update failed", true);
+        }
+      });
+
       resetDefaultsButton.addEventListener("click", async () => {
         settingsSaveToken += 1;
         try {
@@ -474,65 +1042,15 @@
         }
       });
 
-      const sendDriver = async (awake) => {
-        const res = await fetch("/api/driver", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ awake }),
-        });
-        if (!res.ok) {
-          const text = await res.text();
-          throw new Error(text || res.statusText);
-        }
-        return res.json();
-      };
-
-      driverButton.addEventListener("click", async () => {
-        const nextAwake = !(currentState?.status?.driverAwake !== false);
-        try {
-          setHint(driverHint, nextAwake ? "Waking…" : "Sleeping…");
-          const data = await sendDriver(nextAwake);
-          renderState(data);
-        } catch (err) {
-          setHint(driverHint, err.message || "Failed", true);
-        }
-      });
-
       autoSleepToggle.addEventListener("change", async () => {
         const enabled = autoSleepToggle.checked;
         try {
-          setHint(driverHint, enabled ? "Enabling auto sleep…" : "Disabling auto sleep…");
+          setHint(runHint, enabled ? "Auto sleep enabled" : "Auto sleep disabled");
           const data = await sendSettings({ autoSleep: enabled });
           renderState(data);
         } catch (err) {
-          setHint(driverHint, err.message || "Failed", true);
+          setHint(runHint, err.message || "Failed to update auto sleep", true);
         }
-      });
-
-      targetUnits.addEventListener("change", () => {
-        const units = normalizeUnits(targetUnits.value);
-        applyUnitMeta(units);
-        if (currentState) {
-          const settings = currentState.settings || {};
-          let value;
-          if (units === "steps") {
-            value = settings.targetSteps;
-          } else if (units === "degrees") {
-            value = settings.targetDegrees;
-          } else {
-            value = settings.targetRevs;
-          }
-          if (value !== undefined) {
-            const formatted =
-              units === "steps"
-                ? Math.round(value)
-                : units === "degrees"
-                ? Number(value).toFixed(1)
-                : Number(value).toFixed(3);
-            setInputValue(targetInput, formatted);
-          }
-        }
-        void saveSettingsFromInputs();
       });
 
       const startPolling = () => {
@@ -542,5 +1060,6 @@
 
       fetchState(true).then(startPolling);
     </script>
+
   </body>
 </html>

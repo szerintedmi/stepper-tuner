@@ -4,6 +4,10 @@
 
 #include <FastAccelStepper.h>
 #include <Preferences.h>
+#include <memory>
+#include <vector>
+
+#include "MotorManager.h"
 
 namespace StepperControl
 {
@@ -13,13 +17,6 @@ enum class TargetUnits
   Revs,
   Steps,
   Degrees
-};
-
-enum class RunMode
-{
-  Idle,
-  Single,
-  PingPong
 };
 
 struct SettingsPatch
@@ -58,18 +55,16 @@ struct StepperState
     bool autoSleep = false;
   } settings;
 
-  struct LastRun
+  struct Motor
   {
-    bool valid = false;
-    bool aborted = false;
-    unsigned long startMs = 0;
-    unsigned long durationMs = 0;
-    long steps = 0;
-    unsigned long loopMaxGapUs = 0;
-  } lastRun;
+    uint16_t id = 0;
+    struct Pins
+    {
+      int step = -1;
+      int dir = -1;
+      int sleep = -1;
+    } pins;
 
-  struct Status
-  {
     RunMode mode = RunMode::Idle;
     bool moving = false;
     bool driverAwake = false;
@@ -79,7 +74,19 @@ struct StepperState
     long targetPosition = 0;
     long distanceToGo = 0;
     float speed = 0.0f;
-  } status;
+
+    struct LastRun
+    {
+      bool valid = false;
+      bool aborted = false;
+      unsigned long startMs = 0;
+      unsigned long durationMs = 0;
+      long steps = 0;
+      unsigned long loopMaxGapUs = 0;
+    } lastRun;
+  };
+
+  std::vector<Motor> motors;
 };
 
 class Motion
@@ -90,21 +97,30 @@ public:
 
   StepperState state() const;
 
-  bool startSingle(int direction);
-  bool startPingPong(int direction);
-  void stop(bool aborted);
-  void reset();
+  bool addMotor(const MotorPins &pins, uint16_t *newMotorId = nullptr);
+  bool hasMotor(uint16_t motorId) const;
+  bool removeMotor(uint16_t motorId);
+  bool updateMotorPins(uint16_t motorId, const MotorPins &pins);
+
+  bool startSingle(uint16_t motorId, int direction);
+  bool startPingPong(uint16_t motorId, int direction);
+  void stop(uint16_t motorId, bool aborted);
+  void stopAll(bool aborted);
+  void reset(uint16_t motorId);
+  void resetAll();
 
   bool saveDefaults();
   bool restoreDefaults();
 
-  void setDriverAwake(bool awake);
-  bool driverAwake() const { return driverAwakeFlag; }
+  void setDriverAwake(uint16_t motorId, bool awake);
+  void setDriverAwakeAll(bool awake);
+  bool driverAwake(uint16_t motorId) const;
   bool autoSleepEnabled() const { return config.autoSleep; }
 
   void applySettings(const SettingsPatch &patch);
 
 private:
+  friend class MotorManager;
   struct TargetState
   {
     TargetUnits units = TargetUnits::Revs;
@@ -124,34 +140,12 @@ private:
     bool autoSleep = true;
   } config;
 
-  struct MotionState
-  {
-    RunMode mode = RunMode::Idle;
-    int currentDirection = 1;
-    long anchorPosition = 0;
-    long segmentSteps = 0;
-    unsigned long segmentStartMs = 0;
-    long segmentStartPos = 0;
-  } motion;
-
-  struct LastRunInfo
-  {
-    bool valid = false;
-    bool aborted = false;
-    unsigned long startMs = 0;
-    unsigned long durationMs = 0;
-    long steps = 0;
-    unsigned long loopMaxGapUs = 0;
-  } lastRun;
-
   FastAccelStepperEngine engine;
-  FastAccelStepper *stepper = nullptr;
+  std::unique_ptr<MotorManager> motorManager;
+  uint16_t nextMotorId = 1;
 
   Preferences prefs;
   bool prefsOpen = false;
-
-  bool driverAwakeFlag = false;
-  unsigned long autoSleepRequestMs = 0;
 
   static long roundToLong(double value);
 
@@ -162,16 +156,27 @@ private:
   TargetState computeTarget(TargetUnits units, double rawValue, long stepsPerRev) const;
   void updateTarget(TargetUnits units, double value);
 
-  void applyMotionSettings();
-  void resetLastRun();
-  void recordLastRun(bool aborted);
+  MotorManager &manager();
+  const MotorManager &manager() const;
+  MotorManager::Motor *findMotor(uint16_t motorId);
+  const MotorManager::Motor *findMotor(uint16_t motorId) const;
+  void updateIdleSegmentSteps();
 
-  bool ensureDriverAwake();
-  bool beginMove(int direction);
-  void continuePingPong();
+  void resetLastRun(MotorManager::Motor &motor);
+  void recordLastRun(MotorManager::Motor &motor, bool aborted);
+  bool ensureDriverAwake(MotorManager::Motor &motor);
+  bool beginMove(MotorManager::Motor &motor, int direction);
+  void continuePingPong(MotorManager::Motor &motor);
+  void applyMotionSettings(MotorManager::Motor &motor);
+  void applyMotionSettingsAll();
+  void setDriverAwakeForMotor(MotorManager::Motor &motor, bool awake);
+  void stopMotor(MotorManager::Motor &motor, bool aborted);
+  void resetMotor(MotorManager::Motor &motor);
 
   bool ensurePrefs();
   void loadDefaults();
+  void loadMotorsFromPrefs();
+  void persistMotors();
 };
 
 } // namespace StepperControl

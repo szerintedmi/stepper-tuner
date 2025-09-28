@@ -83,24 +83,34 @@ void HttpRoutes::writeState(JsonVariant root)
   settings["acceleration"] = st.settings.acceleration;
   settings["autoSleep"] = st.settings.autoSleep;
 
-  JsonObject status = obj["status"].to<JsonObject>();
-  status["mode"] = modeToString(st.status.mode);
-  status["moving"] = st.status.moving;
-  status["driverAwake"] = st.status.driverAwake;
-  status["direction"] = st.status.direction;
-  status["segmentSteps"] = st.status.segmentSteps;
-  status["currentPosition"] = st.status.currentPosition;
-  status["targetPosition"] = st.status.targetPosition;
-  status["distanceToGo"] = st.status.distanceToGo;
-  status["speed"] = st.status.speed;
+  JsonArray motors = obj["motors"].to<JsonArray>();
+  for (const auto &motor : st.motors)
+  {
+    JsonObject node = motors.add<JsonObject>();
+    node["id"] = motor.id;
+    JsonObject pins = node["pins"].to<JsonObject>();
+    pins["step"] = motor.pins.step;
+    pins["dir"] = motor.pins.dir;
+    pins["sleep"] = motor.pins.sleep;
 
-  JsonObject last = status["lastRun"].to<JsonObject>();
-  last["valid"] = st.lastRun.valid;
-  last["aborted"] = st.lastRun.aborted;
-  last["startMs"] = st.lastRun.startMs;
-  last["durationMs"] = st.lastRun.durationMs;
-  last["steps"] = st.lastRun.steps;
-  last["loopMaxGapUs"] = st.lastRun.loopMaxGapUs;
+    node["mode"] = modeToString(motor.mode);
+    node["moving"] = motor.moving;
+    node["driverAwake"] = motor.driverAwake;
+    node["direction"] = motor.direction;
+    node["segmentSteps"] = motor.segmentSteps;
+    node["currentPosition"] = motor.currentPosition;
+    node["targetPosition"] = motor.targetPosition;
+    node["distanceToGo"] = motor.distanceToGo;
+    node["speed"] = motor.speed;
+
+    JsonObject last = node["lastRun"].to<JsonObject>();
+    last["valid"] = motor.lastRun.valid;
+    last["aborted"] = motor.lastRun.aborted;
+    last["startMs"] = motor.lastRun.startMs;
+    last["durationMs"] = motor.lastRun.durationMs;
+    last["steps"] = motor.lastRun.steps;
+    last["loopMaxGapUs"] = motor.lastRun.loopMaxGapUs;
+  }
 }
 
 void HttpRoutes::sendState(AsyncWebServerRequest *request)
@@ -220,31 +230,43 @@ void HttpRoutes::handleRun(AsyncWebServerRequest *request, JsonVariant &json)
   }
 
   JsonObject obj = json.as<JsonObject>();
+  if (!(obj["motorId"].is<unsigned int>() || obj["motorId"].is<int>()))
+  {
+    sendError(request, 400, "Missing motorId");
+    return;
+  }
+  uint16_t motorId = static_cast<uint16_t>(obj["motorId"].as<unsigned int>());
+  if (!motion.hasMotor(motorId))
+  {
+    sendError(request, 404, "Unknown motor");
+    return;
+  }
+
   const char *mode = obj["mode"].is<const char *>() ? obj["mode"].as<const char *>() : "single";
   int direction = obj["direction"].is<int>() ? obj["direction"].as<int>() : 1;
 
-  if (strcmp(mode, "stop") == 0)
+  if (strcmp(mode, "single") == 0)
   {
-    motion.stop(true);
-    if (motion.autoSleepEnabled())
+    if (!motion.startSingle(motorId, direction))
     {
-      motion.setDriverAwake(false);
-    }
-  }
-  else if (strcmp(mode, "single") == 0)
-  {
-    if (!motion.startSingle(direction))
-    {
-      sendError(request, 409, "Stepper busy or invalid target");
+      sendError(request, 409, "Motor busy or invalid target");
       return;
     }
   }
   else if (strcmp(mode, "pingpong") == 0)
   {
-    if (!motion.startPingPong(direction))
+    if (!motion.startPingPong(motorId, direction))
     {
-      sendError(request, 409, "Stepper busy or invalid target");
+      sendError(request, 409, "Motor busy or invalid target");
       return;
+    }
+  }
+  else if (strcmp(mode, "stop") == 0)
+  {
+    motion.stop(motorId, true);
+    if (motion.autoSleepEnabled())
+    {
+      motion.setDriverAwake(motorId, false);
     }
   }
   else
@@ -265,14 +287,208 @@ void HttpRoutes::handleDriver(AsyncWebServerRequest *request, JsonVariant &json)
   }
 
   JsonObject obj = json.as<JsonObject>();
+  if (!(obj["motorId"].is<unsigned int>() || obj["motorId"].is<int>()))
+  {
+    sendError(request, 400, "Missing motorId");
+    return;
+  }
   if (!obj["awake"].is<bool>())
   {
     sendError(request, 400, "Missing awake bool");
     return;
   }
 
+  uint16_t motorId = static_cast<uint16_t>(obj["motorId"].as<unsigned int>());
+  if (!motion.hasMotor(motorId))
+  {
+    sendError(request, 404, "Unknown motor");
+    return;
+  }
+
   bool awake = obj["awake"].as<bool>();
-  motion.setDriverAwake(awake);
+  motion.setDriverAwake(motorId, awake);
+  sendState(request);
+}
+
+void HttpRoutes::handleStop(AsyncWebServerRequest *request, JsonVariant &json)
+{
+  if (!json.is<JsonObject>())
+  {
+    sendError(request, 400, "Expected JSON object");
+    return;
+  }
+
+  JsonObject obj = json.as<JsonObject>();
+  bool aborted = obj["aborted"].is<bool>() ? obj["aborted"].as<bool>() : true;
+  bool sleepDriver = obj["sleepDriver"].is<bool>() ? obj["sleepDriver"].as<bool>() : motion.autoSleepEnabled();
+
+  if (obj["motorId"].isNull())
+  {
+    motion.stopAll(aborted);
+    if (sleepDriver)
+    {
+      motion.setDriverAwakeAll(false);
+    }
+  }
+  else if (obj["motorId"].is<unsigned int>() || obj["motorId"].is<int>())
+  {
+    uint16_t motorId = static_cast<uint16_t>(obj["motorId"].as<unsigned int>());
+    if (!motion.hasMotor(motorId))
+    {
+      sendError(request, 404, "Unknown motor");
+      return;
+    }
+    motion.stop(motorId, aborted);
+    if (sleepDriver)
+    {
+      motion.setDriverAwake(motorId, false);
+    }
+  }
+  else
+  {
+    sendError(request, 400, "Invalid motorId");
+    return;
+  }
+
+  sendState(request);
+}
+
+void HttpRoutes::handleReset(AsyncWebServerRequest *request, JsonVariant &json)
+{
+  if (!json.is<JsonObject>())
+  {
+    sendError(request, 400, "Expected JSON object");
+    return;
+  }
+
+  JsonObject obj = json.as<JsonObject>();
+  if (obj["motorId"].isNull())
+  {
+    motion.resetAll();
+  }
+  else if (obj["motorId"].is<unsigned int>() || obj["motorId"].is<int>())
+  {
+    uint16_t motorId = static_cast<uint16_t>(obj["motorId"].as<unsigned int>());
+    if (!motion.hasMotor(motorId))
+    {
+      sendError(request, 404, "Unknown motor");
+      return;
+    }
+    motion.reset(motorId);
+  }
+  else
+  {
+    sendError(request, 400, "Invalid motorId");
+    return;
+  }
+
+  sendState(request);
+}
+
+void HttpRoutes::handleAddMotor(AsyncWebServerRequest *request, JsonVariant &json)
+{
+  if (!json.is<JsonObject>())
+  {
+    sendError(request, 400, "Expected JSON object");
+    return;
+  }
+
+  JsonObject obj = json.as<JsonObject>();
+  if (!obj["step"].is<int>() || !obj["dir"].is<int>() || !obj["sleep"].is<int>())
+  {
+    sendError(request, 400, "Missing motor pins");
+    return;
+  }
+
+  MotorPins pins;
+  pins.step = obj["step"].as<int>();
+  pins.dir = obj["dir"].as<int>();
+  pins.sleep = obj["sleep"].as<int>();
+
+  uint16_t newId = 0;
+  if (!motion.addMotor(pins, &newId))
+  {
+    sendError(request, 409, "Failed to add motor");
+    return;
+  }
+
+  auto *response = new AsyncJsonResponse();
+  JsonVariant root = response->getRoot();
+  writeState(root);
+  root.as<JsonObject>()["createdMotorId"] = newId;
+  response->setLength();
+  request->send(response);
+}
+
+void HttpRoutes::handleUpdateMotor(AsyncWebServerRequest *request, JsonVariant &json)
+{
+  if (!json.is<JsonObject>())
+  {
+    sendError(request, 400, "Expected JSON object");
+    return;
+  }
+
+  JsonObject obj = json.as<JsonObject>();
+  if (!(obj["motorId"].is<unsigned int>() || obj["motorId"].is<int>()))
+  {
+    sendError(request, 400, "Missing motorId");
+    return;
+  }
+  if (!obj["step"].is<int>() || !obj["dir"].is<int>() || !obj["sleep"].is<int>())
+  {
+    sendError(request, 400, "Missing motor pins");
+    return;
+  }
+
+  uint16_t motorId = static_cast<uint16_t>(obj["motorId"].as<unsigned int>());
+  if (!motion.hasMotor(motorId))
+  {
+    sendError(request, 404, "Unknown motor");
+    return;
+  }
+
+  MotorPins pins;
+  pins.step = obj["step"].as<int>();
+  pins.dir = obj["dir"].as<int>();
+  pins.sleep = obj["sleep"].as<int>();
+
+  if (!motion.updateMotorPins(motorId, pins))
+  {
+    sendError(request, 409, "Failed to update motor");
+    return;
+  }
+
+  sendState(request);
+}
+
+void HttpRoutes::handleRemoveMotor(AsyncWebServerRequest *request, JsonVariant &json)
+{
+  if (!json.is<JsonObject>())
+  {
+    sendError(request, 400, "Expected JSON object");
+    return;
+  }
+
+  JsonObject obj = json.as<JsonObject>();
+  if (!(obj["motorId"].is<unsigned int>() || obj["motorId"].is<int>()))
+  {
+    sendError(request, 400, "Missing motorId");
+    return;
+  }
+
+  uint16_t motorId = static_cast<uint16_t>(obj["motorId"].as<unsigned int>());
+  if (!motion.hasMotor(motorId))
+  {
+    sendError(request, 404, "Unknown motor");
+    return;
+  }
+
+  if (!motion.removeMotor(motorId))
+  {
+    sendError(request, 409, "Failed to remove motor");
+    return;
+  }
+
   sendState(request);
 }
 
@@ -305,6 +521,36 @@ void HttpRoutes::attach(AsyncWebServer &server)
   });
   server.addHandler(runHandler);
 
+  auto *driverHandler = new AsyncCallbackJsonWebHandler("/api/driver", [this](AsyncWebServerRequest *request, JsonVariant &json) {
+    handleDriver(request, json);
+  });
+  server.addHandler(driverHandler);
+
+  auto *stopHandler = new AsyncCallbackJsonWebHandler("/api/stop", [this](AsyncWebServerRequest *request, JsonVariant &json) {
+    handleStop(request, json);
+  });
+  server.addHandler(stopHandler);
+
+  auto *resetHandler = new AsyncCallbackJsonWebHandler("/api/reset", [this](AsyncWebServerRequest *request, JsonVariant &json) {
+    handleReset(request, json);
+  });
+  server.addHandler(resetHandler);
+
+  auto *motorsAddHandler = new AsyncCallbackJsonWebHandler("/api/motors/add", [this](AsyncWebServerRequest *request, JsonVariant &json) {
+    handleAddMotor(request, json);
+  });
+  server.addHandler(motorsAddHandler);
+
+  auto *motorsUpdateHandler = new AsyncCallbackJsonWebHandler("/api/motors/update", [this](AsyncWebServerRequest *request, JsonVariant &json) {
+    handleUpdateMotor(request, json);
+  });
+  server.addHandler(motorsUpdateHandler);
+
+  auto *motorsRemoveHandler = new AsyncCallbackJsonWebHandler("/api/motors/remove", [this](AsyncWebServerRequest *request, JsonVariant &json) {
+    handleRemoveMotor(request, json);
+  });
+  server.addHandler(motorsRemoveHandler);
+
   server.on("/api/settings/default/save", HTTP_POST, [this](AsyncWebServerRequest *request) {
     if (!motion.saveDefaults())
     {
@@ -322,25 +568,6 @@ void HttpRoutes::attach(AsyncWebServer &server)
     }
     sendState(request);
   });
-
-  server.on("/api/stop", HTTP_POST, [this](AsyncWebServerRequest *request) {
-    motion.stop(true);
-    if (motion.autoSleepEnabled())
-    {
-      motion.setDriverAwake(false);
-    }
-    sendState(request);
-  });
-
-  server.on("/api/reset", HTTP_POST, [this](AsyncWebServerRequest *request) {
-    motion.reset();
-    sendState(request);
-  });
-
-  auto *driverHandler = new AsyncCallbackJsonWebHandler("/api/driver", [this](AsyncWebServerRequest *request, JsonVariant &json) {
-    handleDriver(request, json);
-  });
-  server.addHandler(driverHandler);
 }
 
 } // namespace StepperControl

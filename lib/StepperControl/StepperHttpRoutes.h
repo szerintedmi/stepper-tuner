@@ -33,9 +33,13 @@ private:
   void handleSettings(AsyncWebServerRequest *request, JsonVariant &json);
   void handleRun(AsyncWebServerRequest *request, JsonVariant &json);
   void handleDriver(AsyncWebServerRequest *request, JsonVariant &json);
+  void handleStop(AsyncWebServerRequest *request, JsonVariant &json);
+  void handleReset(AsyncWebServerRequest *request, JsonVariant &json);
+  void handleAddMotor(AsyncWebServerRequest *request, JsonVariant &json);
+  void handleUpdateMotor(AsyncWebServerRequest *request, JsonVariant &json);
+  void handleRemoveMotor(AsyncWebServerRequest *request, JsonVariant &json);
 
   void sendError(AsyncWebServerRequest *request, int code, const char *message);
 };
 
 } // namespace StepperControl
-
