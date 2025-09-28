@@ -28,12 +28,11 @@
             Acceleration (steps/s²)
             <input id="acceleration" type="number" min="1" step="1" required />
           </label>
-          <div class="form-actions">
-            <button type="submit">Apply</button>
-            <button type="button" class="secondary" id="refresh">Refresh</button>
-          </div>
-          <div id="form-hint" class="hint"></div>
         </form>
+        <div class="form-actions">
+          <button type="button" class="secondary" id="reset-default">Reset to default</button>
+        </div>
+        <div id="form-hint" class="hint"></div>
         <label class="toggle">
           <input type="checkbox" id="auto-sleep" checked />
           <span>Auto sleep driver</span>
@@ -114,7 +113,6 @@
 
     <script>
       const el = (id) => document.getElementById(id);
-      const form = el("settings-form");
       const stepsInput = el("steps-per-rev");
       const targetInput = el("target-value");
       const targetUnits = el("target-units");
@@ -138,19 +136,12 @@
       const driverButton = el("driver-toggle");
       const runButtons = [el("run-forward"), el("run-reverse"), el("run-pingpong")];
       const resetButton = el("reset-position");
+      const resetDefaultsButton = el("reset-default");
       const autoSleepToggle = el("auto-sleep");
       let currentState = null;
       let pollTimer = null;
-      let formDirty = false;
       let lastRunStartSeen = null;
-
-      const markDirty = () => {
-        formDirty = true;
-      };
-
-      [stepsInput, targetInput, maxSpeedInput, accelInput].forEach((input) => {
-        input.addEventListener("input", markDirty);
-      });
+      let settingsSaveToken = 0;
 
       const numberOrNull = (value) => (typeof value === "number" && !Number.isNaN(value) ? value : null);
       const formatInt = (value) => {
@@ -205,38 +196,39 @@
         const awake = status.driverAwake !== false;
         const autoSleepEnabled = settings.autoSleep !== false;
 
-        const activeUnits = formDirty ? normalizeUnits(targetUnits.value || units) : units;
-        applyUnitMeta(activeUnits);
-        if (!formDirty) {
-          setInputValue(stepsInput, settings.stepsPerRev ?? "");
-          targetUnits.value = units;
-          let targetVal;
-          if (units === "steps") {
-            targetVal = settings.targetSteps;
-          } else if (units === "degrees") {
-            targetVal = settings.targetDegrees;
-          } else {
-            targetVal = settings.targetRevs;
+        applyUnitMeta(units);
+        targetUnits.value = units;
+
+        setInputValue(stepsInput, settings.stepsPerRev ?? "");
+        let targetVal;
+        if (units === "steps") {
+          targetVal = settings.targetSteps;
+        } else if (units === "degrees") {
+          targetVal = settings.targetDegrees;
+        } else {
+          targetVal = settings.targetRevs;
+        }
+        if (targetVal !== undefined) {
+          const formatted =
+            units === "steps"
+              ? Math.round(targetVal)
+              : units === "degrees"
+              ? Number(targetVal).toFixed(1)
+              : Number(targetVal).toFixed(3);
+          setInputValue(targetInput, formatted);
+        }
+        setInputValue(maxSpeedInput, settings.maxSpeed !== undefined ? Math.round(settings.maxSpeed) : "");
+        setInputValue(accelInput, settings.acceleration !== undefined ? Math.round(settings.acceleration) : "");
+        if (settings.maxSpeedLimit) {
+          const limit = Math.round(settings.maxSpeedLimit);
+          maxSpeedInput.max = limit;
+          maxSpeedInput.title = `Limit ${limit} steps/s`;
+          if (!formHint.textContent) {
+            setHint(formHint, `Speed limit: ${limit} steps/s`);
           }
-          if (targetVal !== undefined) {
-            const formatted =
-              units === "steps"
-                ? Math.round(targetVal)
-                : units === "degrees"
-                ? Number(targetVal).toFixed(1)
-                : Number(targetVal).toFixed(3);
-            setInputValue(targetInput, formatted);
-          }
-          setInputValue(maxSpeedInput, settings.maxSpeed !== undefined ? Math.round(settings.maxSpeed) : "");
-          setInputValue(accelInput, settings.acceleration !== undefined ? Math.round(settings.acceleration) : "");
-          if (settings.maxSpeedLimit) {
-            const limit = Math.round(settings.maxSpeedLimit);
-            maxSpeedInput.max = limit;
-            maxSpeedInput.title = `Limit ${limit} steps/s`;
-            if (!formHint.textContent) {
-              setHint(formHint, `Speed limit: ${limit} steps/s`);
-            }
-          }
+        } else {
+          maxSpeedInput.removeAttribute("max");
+          maxSpeedInput.removeAttribute("title");
         }
         autoSleepToggle.checked = autoSleepEnabled;
 
@@ -315,7 +307,7 @@
         return res.json();
       };
 
-      const applySettings = async () => {
+      const collectSettingsFromInputs = () => {
         const units = normalizeUnits(targetUnits.value);
         const stepsPerRev = Number.parseInt(stepsInput.value, 10);
         const targetValueRaw = Number.parseFloat(targetInput.value);
@@ -324,22 +316,22 @@
 
         if (!Number.isFinite(stepsPerRev) || stepsPerRev < 1) {
           setHint(formHint, "Steps per rev must be at least 1", true);
-          return false;
+          return null;
         }
         if (!Number.isFinite(targetValueRaw) || targetValueRaw < 0) {
           setHint(formHint, "Target must be zero or positive", true);
-          return false;
+          return null;
         }
         if (!Number.isFinite(maxSpeed) || maxSpeed < 1) {
           setHint(formHint, "Set a valid max speed", true);
-          return false;
+          return null;
         }
         if (!Number.isFinite(acceleration) || acceleration < 1) {
           setHint(formHint, "Set a valid acceleration", true);
-          return false;
+          return null;
         }
 
-        const payload = {
+        return {
           stepsPerRev,
           targetUnits: units,
           targetValue:
@@ -351,23 +343,33 @@
           maxSpeed,
           acceleration,
         };
+      };
+
+      const saveSettingsFromInputs = async () => {
+        const payload = collectSettingsFromInputs();
+        if (!payload) {
+          return;
+        }
+
+        const requestId = ++settingsSaveToken;
+        setHint(formHint, "");
 
         try {
-          setHint(formHint, "Saving…");
           const data = await sendSettings(payload);
-          formDirty = false;
-          renderState(data);
-          setHint(formHint, "Settings updated");
-          return true;
+          if (requestId === settingsSaveToken) {
+            renderState(data);
+          }
         } catch (err) {
-          setHint(formHint, err.message || "Failed to save", true);
-          return false;
+          if (requestId === settingsSaveToken) {
+            setHint(formHint, err.message || "Failed to save", true);
+          }
         }
       };
 
-      form.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        await applySettings();
+      [stepsInput, targetInput, maxSpeedInput, accelInput].forEach((input) => {
+        input.addEventListener("change", () => {
+          void saveSettingsFromInputs();
+        });
       });
 
       const sendRun = async (payload) => {
@@ -393,17 +395,6 @@
       };
 
       const runWith = async (mode, direction) => {
-        if (mode !== "stop" && formDirty) {
-          const applyChanges = window.confirm("Apply motion settings before running?");
-          if (applyChanges) {
-            const applied = await applySettings();
-            if (!applied) {
-              setHint(runHint, "Run canceled – fix motion settings", true);
-              return;
-            }
-          }
-        }
-
         try {
           setHint(runHint, mode === "stop" ? "Stopping…" : "Command sent");
           const data = await sendRun({ mode, direction });
@@ -434,8 +425,9 @@
           setHint(runHint, err.message || "Failed", true);
         }
       });
-      el("refresh").addEventListener("click", () => {
-        formDirty = false;
+      resetDefaultsButton.addEventListener("click", () => {
+        settingsSaveToken += 1;
+        setHint(formHint, "");
         fetchState(true);
       });
 
@@ -475,28 +467,29 @@
       });
 
       targetUnits.addEventListener("change", () => {
-        markDirty();
         const units = normalizeUnits(targetUnits.value);
         applyUnitMeta(units);
-        if (!currentState) return;
-        const settings = currentState.settings || {};
-        let value;
-        if (units === "steps") {
-          value = settings.targetSteps;
-        } else if (units === "degrees") {
-          value = settings.targetDegrees;
-        } else {
-          value = settings.targetRevs;
+        if (currentState) {
+          const settings = currentState.settings || {};
+          let value;
+          if (units === "steps") {
+            value = settings.targetSteps;
+          } else if (units === "degrees") {
+            value = settings.targetDegrees;
+          } else {
+            value = settings.targetRevs;
+          }
+          if (value !== undefined) {
+            const formatted =
+              units === "steps"
+                ? Math.round(value)
+                : units === "degrees"
+                ? Number(value).toFixed(1)
+                : Number(value).toFixed(3);
+            setInputValue(targetInput, formatted);
+          }
         }
-        if (value !== undefined) {
-          const formatted =
-            units === "steps"
-              ? Math.round(value)
-              : units === "degrees"
-              ? Number(value).toFixed(1)
-              : Number(value).toFixed(3);
-          setInputValue(targetInput, formatted);
-        }
+        void saveSettingsFromInputs();
       });
 
       const startPolling = () => {
