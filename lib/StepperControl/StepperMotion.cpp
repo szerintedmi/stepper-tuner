@@ -49,67 +49,52 @@ float Motion::clampAcceleration(float value) const
 
 Motion::TargetState Motion::computeTarget(TargetUnits units, double rawValue, long stepsPerRev) const
 {
-  if (rawValue < 0.0)
-  {
-    rawValue = 0.0;
-  }
-
   TargetState t;
   t.units = units;
+
+  double revs = 0.0;
+  switch (units)
+  {
+  case TargetUnits::Steps:
+    revs = rawValue / static_cast<double>(stepsPerRev);
+    break;
+  case TargetUnits::Degrees:
+    revs = rawValue / 360.0;
+    break;
+  case TargetUnits::Revs:
+  default:
+    revs = rawValue;
+    break;
+  }
+
+  if (revs < 0.0)
+  {
+    revs = 0.0;
+  }
+
+  long steps = roundToLong(revs * static_cast<double>(stepsPerRev));
+  if (steps < 0)
+  {
+    steps = 0;
+  }
+
+  float revsFloat = static_cast<float>(revs);
+  t.revs = revsFloat;
+  t.degrees = revsFloat * 360.0f;
+  t.steps = steps;
 
   switch (units)
   {
   case TargetUnits::Steps:
-  {
-    long steps = roundToLong(rawValue);
-    if (steps < 0)
-    {
-      steps = 0;
-    }
-    t.steps = steps;
-    t.revs = static_cast<float>(steps) / static_cast<float>(stepsPerRev);
-    t.degrees = t.revs * 360.0f;
     t.value = static_cast<double>(steps);
     break;
-  }
   case TargetUnits::Degrees:
-  {
-    double degrees = rawValue;
-    if (degrees < 0.0)
-    {
-      degrees = 0.0;
-    }
-    double revs = degrees / 360.0;
-    long steps = roundToLong(revs * static_cast<double>(stepsPerRev));
-    if (steps < 0)
-    {
-      steps = 0;
-    }
-    t.value = degrees;
-    t.degrees = static_cast<float>(degrees);
-    t.revs = static_cast<float>(revs);
-    t.steps = steps;
+    t.value = static_cast<double>(t.degrees);
     break;
-  }
   case TargetUnits::Revs:
   default:
-  {
-    double revs = rawValue;
-    if (revs < 0.0)
-    {
-      revs = 0.0;
-    }
-    long steps = roundToLong(revs * static_cast<double>(stepsPerRev));
-    if (steps < 0)
-    {
-      steps = 0;
-    }
     t.value = revs;
-    t.revs = static_cast<float>(revs);
-    t.degrees = t.revs * 360.0f;
-    t.steps = steps;
     break;
-  }
   }
 
   return t;
