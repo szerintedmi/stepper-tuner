@@ -6,7 +6,7 @@
 #include <AsyncJson.h>
 #include <ArduinoJson.h>
 
-#include "StepperMotion.h"
+#include "StepperManager.h"
 
 namespace StepperControl
 {
@@ -14,12 +14,12 @@ namespace StepperControl
 class HttpRoutes
 {
 public:
-  explicit HttpRoutes(Motion &motion) : motion(motion) {}
+  explicit HttpRoutes(StepperManager &manager) : motion(manager) {}
 
   void attach(AsyncWebServer &server);
 
 private:
-  Motion &motion;
+  StepperManager &motion;
   bool fsMounted = false;
 
   static const char *unitsToString(TargetUnits units);

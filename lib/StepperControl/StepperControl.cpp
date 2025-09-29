@@ -3,27 +3,26 @@
 #include <Arduino.h>
 
 #include "StepperHttpRoutes.h"
-#include "StepperMotion.h"
+#include "StepperManager.h"
 
 namespace StepperControl
 {
 namespace
 {
-  Motion motion;
-  HttpRoutes routes(motion);
+  StepperManager manager;
+  HttpRoutes routes(manager);
 }
 
 void begin(AsyncWebServer &server)
 {
   Serial.println("StepperControl: begin");
-  motion.begin();
+  manager.begin();
   routes.attach(server);
 }
 
 void loop()
 {
-  motion.loop();
+  manager.loop();
 }
 
 } // namespace StepperControl
-
