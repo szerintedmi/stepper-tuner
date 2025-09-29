@@ -81,7 +81,7 @@ namespace StepperControl
 
     TargetState computeTarget(TargetUnits units, double rawValue, long stepsPerRev) const;
     void updateTarget(TargetUnits units, double value);
-    void updateIdleSegmentSteps();
+    void syncIdlePlannedSteps();
 
     StepperMotor *findMotor(uint16_t motorId);
     const StepperMotor *findMotor(uint16_t motorId) const;

@@ -131,16 +131,18 @@ namespace StepperControl
   void StepperManager::updateTarget(TargetUnits units, double value)
   {
     config.target = computeTarget(units, value, config.stepsPerRev);
-    updateIdleSegmentSteps();
+    syncIdlePlannedSteps();
   }
 
-  void StepperManager::updateIdleSegmentSteps()
+  void StepperManager::syncIdlePlannedSteps()
   {
+    // Keep idle motors reporting the current target distance so the UI knows
+    // what the next run will cover even before motion starts.
     for (auto &motor : motors)
     {
       if (motor.mode == RunMode::Idle)
       {
-        motor.setSegmentSteps(config.target.steps);
+        motor.updatePlannedSteps(config.target.steps);
       }
     }
   }
@@ -357,7 +359,7 @@ namespace StepperControl
       else
       {
         applyMotionSettingsAll();
-        updateIdleSegmentSteps();
+        syncIdlePlannedSteps();
       }
     }
     else
@@ -375,14 +377,14 @@ namespace StepperControl
     bool ok = true;
     for (auto &motor : motors)
     {
-      if (!motor.attach(engine))
-      {
-        ok = false;
-        break;
-      }
-      motor.resetRuntimeState();
-      motor.setSegmentSteps(config.target.steps);
+    if (!motor.attach(engine))
+    {
+      ok = false;
+      break;
     }
+    motor.resetRuntimeState();
+    motor.updatePlannedSteps(config.target.steps);
+  }
 
     if (!ok)
     {
@@ -431,19 +433,19 @@ namespace StepperControl
     }
 
     unsigned long now = millis();
-    long anchor = motor.getCurrentPosition();
-    motor.beginSegment(now, anchor, direction);
+    long startPosition = motor.getCurrentPosition();
+    motor.startMove(direction, startPosition, now);
 
     long requestedSteps = config.target.steps;
-    long target = anchor + motor.currentDirection * requestedSteps;
+    long target = startPosition + motor.moveDirection() * requestedSteps;
     applyLimits(motor, target);
 
-    long delta = target - anchor;
+    long delta = target - startPosition;
     if (delta < 0)
     {
       delta = -delta;
     }
-    motor.setSegmentSteps(delta);
+    motor.updatePlannedSteps(delta);
 
     if (delta == 0)
     {
@@ -474,19 +476,19 @@ namespace StepperControl
     motor.recordLastRun(false, millis(), currentPos);
 
     unsigned long now = millis();
-    long anchor = currentPos;
-    int nextDirection = -motor.currentDirection;
-    motor.beginSegment(now, anchor, nextDirection);
+    long nextStart = currentPos;
+    int nextDirection = -motor.moveDirection();
+    motor.startMove(nextDirection, nextStart, now);
 
     long requestedSteps = config.target.steps;
-    long target = anchor + motor.currentDirection * requestedSteps;
+    long target = nextStart + motor.moveDirection() * requestedSteps;
     applyLimits(motor, target);
-    long delta = target - anchor;
+    long delta = target - nextStart;
     if (delta < 0)
     {
       delta = -delta;
     }
-    motor.setSegmentSteps(delta);
+    motor.updatePlannedSteps(delta);
     if (delta == 0)
     {
       motor.mode = RunMode::Idle;
@@ -506,7 +508,8 @@ namespace StepperControl
     if (!motor.isAttached())
     {
       motor.mode = RunMode::Idle;
-      motor.setSegmentSteps(config.target.steps);
+      motor.resetRuntimeState();
+      motor.updatePlannedSteps(config.target.steps);
       return;
     }
 
@@ -519,7 +522,7 @@ namespace StepperControl
     }
 
     motor.mode = RunMode::Idle;
-    motor.setSegmentSteps(config.target.steps);
+    motor.updatePlannedSteps(config.target.steps);
   }
 
   void StepperManager::resetMotor(StepperMotor &motor)
@@ -527,7 +530,7 @@ namespace StepperControl
     stopMotor(motor, false);
     motor.setCurrentPosition(0);
     motor.resetRuntimeState();
-    motor.setSegmentSteps(config.target.steps);
+    motor.updatePlannedSteps(config.target.steps);
   }
 
   void StepperManager::begin()
@@ -537,7 +540,7 @@ namespace StepperControl
     engine.init();
     loadMotorsFromPrefs();
     applyMotionSettingsAll();
-    updateIdleSegmentSteps();
+    syncIdlePlannedSteps();
   }
 
   void StepperManager::loop()
@@ -558,7 +561,7 @@ namespace StepperControl
         {
           motor.recordLastRun(false, now, motor.getCurrentPosition());
           motor.mode = RunMode::Idle;
-          motor.setSegmentSteps(config.target.steps);
+          motor.updatePlannedSteps(config.target.steps);
         }
       }
       else if (motor.mode == RunMode::PingPong)
@@ -625,8 +628,8 @@ namespace StepperControl
       report.pins = motor.pins();
       report.mode = motor.mode;
       report.driverAwake = motor.driverAwake();
-      report.direction = motor.currentDirection;
-      report.segmentSteps = motor.segmentSteps;
+      report.direction = motor.moveDirection();
+      report.plannedSteps = motor.activeMove().plannedSteps;
 
       if (motor.isAttached())
       {
@@ -638,6 +641,14 @@ namespace StepperControl
         report.targetPosition = targetPosition;
         report.distanceToGo = targetPosition - currentPosition;
         report.speed = motor.getCurrentSpeedHz();
+      }
+      else
+      {
+        long currentPosition = motor.getCurrentPosition();
+        report.currentPosition = currentPosition;
+        report.targetPosition = currentPosition;
+        report.distanceToGo = 0;
+        report.speed = 0.0f;
       }
 
       report.lastRun.valid = motor.lastRun.valid;
@@ -681,7 +692,7 @@ namespace StepperControl
     }
 
     applyMotionSettingsAll();
-    updateIdleSegmentSteps();
+    syncIdlePlannedSteps();
 
     if (newMotorId)
     {
@@ -719,7 +730,7 @@ namespace StepperControl
         Serial.println("StepperControl: Failed to rebuild motors after remove");
       }
 
-      updateIdleSegmentSteps();
+      syncIdlePlannedSteps();
       persistMotors();
       return true;
     }
@@ -756,7 +767,7 @@ namespace StepperControl
     }
 
     applyMotionSettingsAll();
-    updateIdleSegmentSteps();
+    syncIdlePlannedSteps();
     persistMotors();
     return true;
   }
@@ -857,7 +868,7 @@ namespace StepperControl
     stopAll(true);
     loadDefaults();
     applyMotionSettingsAll();
-    updateIdleSegmentSteps();
+    syncIdlePlannedSteps();
     return true;
   }
 

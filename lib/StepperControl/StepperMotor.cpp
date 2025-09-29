@@ -5,204 +5,213 @@
 namespace StepperControl
 {
 
-  StepperMotor::StepperMotor(uint16_t id, const MotorPins &pins)
-      : id_(id), pins_(pins)
+StepperMotor::StepperMotor(uint16_t id, const MotorPins &pins)
+    : id_(id), pins_(pins)
+{
+}
+
+bool StepperMotor::attach(FastAccelStepperEngine &engine)
+{
+  detach();
+
+  stepper_ = engine.stepperConnectToPin(static_cast<uint8_t>(pins_.step));
+  if (!stepper_)
   {
+    Serial.printf("StepperControl: Failed to attach motor %u to STEP pin %d\n", id_, pins_.step);
+    return false;
   }
 
-  bool StepperMotor::attach(FastAccelStepperEngine &engine)
+  stepper_->setDirectionPin(static_cast<uint8_t>(pins_.dir));
+  stepper_->setEnablePin(static_cast<uint8_t>(pins_.sleep), false);
+  stepper_->setAutoEnable(false);
+  stepper_->disableOutputs();
+
+  driverAwake_ = false;
+  autoSleepRequestMs_ = 0;
+  lastKnownPosition_ = 0;
+  resetRuntimeState();
+  return true;
+}
+
+void StepperMotor::detach()
+{
+  if (stepper_)
   {
-    detach();
-
-    stepper_ = engine.stepperConnectToPin(static_cast<uint8_t>(pins_.step));
-    if (!stepper_)
-    {
-      Serial.printf("StepperControl: Failed to attach motor %u to STEP pin %d\n", id_, pins_.step);
-      return false;
-    }
-
-    stepper_->setDirectionPin(static_cast<uint8_t>(pins_.dir));
-    stepper_->setEnablePin(static_cast<uint8_t>(pins_.sleep), false);
-    stepper_->setAutoEnable(false);
     stepper_->disableOutputs();
+    stepper_->detachFromPin();
+    stepper_ = nullptr;
+  }
+  driverAwake_ = false;
+  autoSleepRequestMs_ = 0;
+  resetRuntimeState();
+}
 
+void StepperMotor::setDriverAwake(bool awake, unsigned long wakeDelayMs)
+{
+  if (!stepper_)
+  {
     driverAwake_ = false;
     autoSleepRequestMs_ = 0;
-    resetRuntimeState();
-    return true;
+    return;
   }
 
-  void StepperMotor::detach()
+  if (awake)
   {
-    if (stepper_)
+    if (!driverAwake_)
     {
-      stepper_->disableOutputs();
-      stepper_->detachFromPin();
-      stepper_ = nullptr;
-    }
-    driverAwake_ = false;
-    autoSleepRequestMs_ = 0;
-    resetRuntimeState();
-  }
-
-  void StepperMotor::setDriverAwake(bool awake, unsigned long wakeDelayMs)
-  {
-    if (!stepper_)
-    {
-      driverAwake_ = false;
-      autoSleepRequestMs_ = 0;
-      return;
-    }
-
-    if (awake)
-    {
-      if (!driverAwake_)
+      stepper_->enableOutputs();
+      if (wakeDelayMs > 0)
       {
-        stepper_->enableOutputs();
-        if (wakeDelayMs > 0)
-        {
-          delay(wakeDelayMs);
-        }
-        driverAwake_ = true;
+        delay(wakeDelayMs);
       }
-      autoSleepRequestMs_ = 0;
-      return;
+      driverAwake_ = true;
     }
-
-    if (!driverAwake_)
-    {
-      return;
-    }
-
-    stepper_->disableOutputs();
-    driverAwake_ = false;
     autoSleepRequestMs_ = 0;
+    return;
   }
 
-  bool StepperMotor::ensureDriverAwake(unsigned long wakeDelayMs)
+  if (!driverAwake_)
   {
-    if (!driverAwake_)
-    {
-      setDriverAwake(true, wakeDelayMs);
-    }
-    return driverAwake_;
+    return;
   }
 
-  MoveResultCode StepperMotor::moveTo(long targetPosition)
+  stepper_->disableOutputs();
+  driverAwake_ = false;
+  autoSleepRequestMs_ = 0;
+}
+
+bool StepperMotor::ensureDriverAwake(unsigned long wakeDelayMs)
+{
+  if (!driverAwake_)
   {
-    if (!stepper_)
-    {
-      return MOVE_ERR_ACCELERATION_IS_UNDEFINED;
-    }
-    return stepper_->moveTo(targetPosition);
+    setDriverAwake(true, wakeDelayMs);
   }
+  return driverAwake_;
+}
 
-  bool StepperMotor::isRunning() const
+MoveResultCode StepperMotor::moveTo(long targetPosition)
+{
+  if (!stepper_)
   {
-    return stepper_ && stepper_->isRunning();
+    return MOVE_ERR_ACCELERATION_IS_UNDEFINED;
   }
+  return stepper_->moveTo(targetPosition);
+}
 
-  long StepperMotor::getCurrentPosition() const
+bool StepperMotor::isRunning() const
+{
+  return stepper_ && stepper_->isRunning();
+}
+
+long StepperMotor::getCurrentPosition() const
+{
+  return stepper_ ? stepper_->getCurrentPosition() : lastKnownPosition_;
+}
+
+long StepperMotor::getTargetPosition() const
+{
+  return stepper_ ? stepper_->targetPos() : lastKnownPosition_;
+}
+
+float StepperMotor::getCurrentSpeedHz() const
+{
+  if (!stepper_)
   {
-    return stepper_ ? stepper_->getCurrentPosition() : anchorPosition;
+    return 0.0f;
   }
+  return static_cast<float>(stepper_->getCurrentSpeedInMilliHz(true)) / 1000.0f;
+}
 
-  long StepperMotor::getTargetPosition() const
+void StepperMotor::setCurrentPosition(long position)
+{
+  if (stepper_)
   {
-    return stepper_ ? stepper_->targetPos() : anchorPosition;
+    stepper_->setCurrentPosition(position);
   }
+  lastKnownPosition_ = position;
+  activeMove_.startPosition = position;
+  activeMove_.startMillis = millis();
+}
 
-  float StepperMotor::getCurrentSpeedHz() const
+void StepperMotor::forceStopAtCurrentPosition()
+{
+  if (!stepper_)
   {
-    if (!stepper_)
-    {
-      return 0.0f;
-    }
-    return static_cast<float>(stepper_->getCurrentSpeedInMilliHz(true)) / 1000.0f;
+    return;
   }
+  long currentPos = stepper_->getCurrentPosition();
+  stepper_->forceStopAndNewPosition(currentPos);
+  lastKnownPosition_ = currentPos;
+}
 
-  void StepperMotor::setCurrentPosition(long position)
+bool StepperMotor::configureMotion(float maxSpeedHz, float acceleration)
+{
+  if (!stepper_)
   {
-    if (stepper_)
-    {
-      stepper_->setCurrentPosition(position);
-    }
-    anchorPosition = position;
-    segmentStartPos = position;
+    return false;
   }
 
-  void StepperMotor::forceStopAtCurrentPosition()
+  bool ok = true;
+  if (stepper_->setSpeedInHz(static_cast<uint32_t>(maxSpeedHz)) != 0)
   {
-    if (!stepper_)
-    {
-      return;
-    }
-    long currentPos = stepper_->getCurrentPosition();
-    stepper_->forceStopAndNewPosition(currentPos);
+    ok = false;
   }
-
-  bool StepperMotor::configureMotion(float maxSpeedHz, float acceleration)
+  if (stepper_->setAcceleration(static_cast<int32_t>(acceleration)) != 0)
   {
-    if (!stepper_)
-    {
-      return false;
-    }
-
-    bool ok = true;
-    if (stepper_->setSpeedInHz(static_cast<uint32_t>(maxSpeedHz)) != 0)
-    {
-      ok = false;
-    }
-    if (stepper_->setAcceleration(static_cast<int32_t>(acceleration)) != 0)
-    {
-      ok = false;
-    }
-    return ok;
+    ok = false;
   }
+  return ok;
+}
 
-  void StepperMotor::resetRuntimeState()
-  {
-    mode = RunMode::Idle;
-    currentDirection = 1;
-    anchorPosition = 0;
-    segmentSteps = 0;
-    segmentStartPos = 0;
-    segmentStartMs = millis();
+void StepperMotor::resetRuntimeState()
+{
+  mode = RunMode::Idle;
+  activeMove_.direction = 1;
+  activeMove_.plannedSteps = 0;
+  activeMove_.startPosition = lastKnownPosition_;
+  activeMove_.startMillis = millis();
 
-    lastRun.valid = false;
-    lastRun.aborted = false;
-    lastRun.startMs = millis();
-    lastRun.durationMs = 0;
-    lastRun.steps = 0;
-    lastRun.loopMaxGapUs = 0;
-  }
+  lastRun.valid = false;
+  lastRun.aborted = false;
+  lastRun.startMs = 0;
+  lastRun.durationMs = 0;
+  lastRun.steps = 0;
+  lastRun.loopMaxGapUs = 0;
+}
 
-  void StepperMotor::beginSegment(unsigned long startMs, long anchorPos, int direction)
-  {
-    currentDirection = (direction >= 0) ? 1 : -1;
-    anchorPosition = anchorPos;
-    segmentStartPos = anchorPos;
-    segmentStartMs = startMs;
-    lastRun.valid = false;
-    lastRun.aborted = false;
-    lastRun.startMs = startMs;
-    lastRun.durationMs = 0;
-    lastRun.steps = 0;
-    lastRun.loopMaxGapUs = 0;
-  }
+void StepperMotor::startMove(int direction, long startPosition, unsigned long startMillis)
+{
+  activeMove_.direction = (direction >= 0) ? 1 : -1;
+  activeMove_.startPosition = startPosition;
+  activeMove_.startMillis = startMillis;
+  activeMove_.plannedSteps = 0;
+  lastKnownPosition_ = startPosition;
 
-  void StepperMotor::recordLastRun(bool aborted, unsigned long now, long currentPos)
-  {
-    lastRun.valid = true;
-    lastRun.aborted = aborted;
-    lastRun.durationMs = (segmentStartMs != 0) ? (now - segmentStartMs) : 0;
-    lastRun.steps = currentPos - segmentStartPos;
-    lastRun.loopMaxGapUs = 0;
-    lastRun.startMs = segmentStartMs;
+  lastRun.valid = false;
+  lastRun.aborted = false;
+  lastRun.startMs = startMillis;
+  lastRun.durationMs = 0;
+  lastRun.steps = 0;
+  lastRun.loopMaxGapUs = 0;
+}
 
-    anchorPosition = currentPos;
-    segmentStartPos = currentPos;
-    segmentStartMs = now;
-  }
+void StepperMotor::updatePlannedSteps(long steps)
+{
+  activeMove_.plannedSteps = steps < 0 ? -steps : steps;
+}
+
+void StepperMotor::recordLastRun(bool aborted, unsigned long now, long currentPos)
+{
+  lastRun.valid = true;
+  lastRun.aborted = aborted;
+  lastRun.startMs = activeMove_.startMillis;
+  lastRun.durationMs = (activeMove_.startMillis != 0) ? (now - activeMove_.startMillis) : 0;
+  lastRun.steps = currentPos - activeMove_.startPosition;
+  lastRun.loopMaxGapUs = 0;
+
+  lastKnownPosition_ = currentPos;
+  activeMove_.startPosition = currentPos;
+  activeMove_.startMillis = now;
+}
 
 } // namespace StepperControl

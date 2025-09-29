@@ -90,7 +90,7 @@ struct StepperState
     bool moving = false;
     bool driverAwake = false;
     int direction = 1;
-    long segmentSteps = 0;
+    long plannedSteps = 0;
     long currentPosition = 0;
     long targetPosition = 0;
     long distanceToGo = 0;
@@ -111,4 +111,3 @@ struct StepperState
 };
 
 } // namespace StepperControl
-

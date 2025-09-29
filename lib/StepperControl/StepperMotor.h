@@ -40,17 +40,22 @@ namespace StepperControl
     bool configureMotion(float maxSpeedHz, float acceleration);
 
     void resetRuntimeState();
-    void beginSegment(unsigned long startMs, long anchorPos, int direction);
+    void startMove(int direction, long startPosition, unsigned long startMillis);
     void recordLastRun(bool aborted, unsigned long now, long currentPos);
+    void updatePlannedSteps(long steps);
 
-    void setSegmentSteps(long steps) { segmentSteps = steps; }
+    struct ActiveMove
+    {
+      int direction = 1;
+      long startPosition = 0;
+      unsigned long startMillis = 0;
+      long plannedSteps = 0;
+    };
+
+    const ActiveMove &activeMove() const { return activeMove_; }
+    int moveDirection() const { return activeMove_.direction; }
 
     RunMode mode = RunMode::Idle;
-    int currentDirection = 1;
-    long anchorPosition = 0;
-    long segmentSteps = 0;
-    unsigned long segmentStartMs = 0;
-    long segmentStartPos = 0;
 
     struct LastRunInfo
     {
@@ -68,6 +73,8 @@ namespace StepperControl
     FastAccelStepper *stepper_ = nullptr;
     bool driverAwake_ = false;
     unsigned long autoSleepRequestMs_ = 0;
+    ActiveMove activeMove_;
+    long lastKnownPosition_ = 0;
   };
 
 } // namespace StepperControl

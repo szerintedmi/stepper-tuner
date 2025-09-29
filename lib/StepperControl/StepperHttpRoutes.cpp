@@ -100,7 +100,7 @@ namespace StepperControl
       node["moving"] = motor.moving;
       node["driverAwake"] = motor.driverAwake;
       node["direction"] = motor.direction;
-      node["segmentSteps"] = motor.segmentSteps;
+      node["plannedSteps"] = motor.plannedSteps;
       node["currentPosition"] = motor.currentPosition;
       node["targetPosition"] = motor.targetPosition;
       node["distanceToGo"] = motor.distanceToGo;
