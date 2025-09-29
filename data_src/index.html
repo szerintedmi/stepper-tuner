@@ -95,6 +95,14 @@
               Max position (steps)
               <input id="limit-max" type="number" step="1" />
             </label>
+            <label>
+              Homing overshoot (steps)
+              <input id="homing-overshoot" type="number" step="1" min="0" />
+            </label>
+            <label>
+              Homing backoff (steps)
+              <input id="homing-backoff" type="number" step="1" min="0" />
+            </label>
           </div>
           <label class="toggle" id="auto-sleep-toggle">
             <input type="checkbox" id="auto-sleep" checked />
@@ -121,8 +129,12 @@
       const limitSettings = el("limit-settings");
       const limitMinInput = el("limit-min");
       const limitMaxInput = el("limit-max");
+      const homingOvershootInput = el("homing-overshoot");
+      const homingBackoffInput = el("homing-backoff");
       limitMinInput.disabled = true;
       limitMaxInput.disabled = true;
+      homingOvershootInput.disabled = true;
+      homingBackoffInput.disabled = true;
       const autoSleepToggle = el("auto-sleep");
       const formHint = el("form-hint");
       const runHint = el("run-hint");
@@ -246,6 +258,8 @@
         limitSettings.classList.toggle("hidden", !enabled);
         limitMinInput.disabled = !enabled;
         limitMaxInput.disabled = !enabled;
+        homingOvershootInput.disabled = !enabled;
+        homingBackoffInput.disabled = !enabled;
       };
 
       const readLimitInputs = () => {
@@ -259,7 +273,25 @@
           setHint(formHint, "Limit min must be ≤ max", true);
           return null;
         }
-        return { limitMin, limitMax };
+        const overshootRaw = homingOvershootInput.value === "" ? "0" : homingOvershootInput.value;
+        const backoffRaw = homingBackoffInput.value === "" ? "0" : homingBackoffInput.value;
+        const homingOvershoot = Number.parseInt(overshootRaw, 10);
+        if (!Number.isFinite(homingOvershoot) || homingOvershoot < 0) {
+          setHint(formHint, "Homing overshoot must be ≥ 0", true);
+          return null;
+        }
+        const homingBackoff = Number.parseInt(backoffRaw, 10);
+        if (!Number.isFinite(homingBackoff) || homingBackoff < 0) {
+          setHint(formHint, "Homing backoff must be ≥ 0", true);
+          return null;
+        }
+
+        return {
+          limitMin,
+          limitMax,
+          homingOvershootSteps: homingOvershoot,
+          homingBackoffSteps: homingBackoff,
+        };
       };
 
       const getEffectiveLimits = () => {
@@ -353,6 +385,8 @@
         const limitsEnabled = settings.limitsEnabled === true;
         const limitMinValue = numberOrNull(settings.limitMin);
         const limitMaxValue = numberOrNull(settings.limitMax);
+        const homingOvershootValue = numberOrNull(settings.homingOvershootSteps);
+        const homingBackoffValue = numberOrNull(settings.homingBackoffSteps);
         defaultLimitRange = computeDefaultLimitRange(stepsPerRev);
         limitsToggle.checked = limitsEnabled;
         setInputValue(
@@ -362,6 +396,14 @@
         setInputValue(
           limitMaxInput,
           limitMaxValue !== null ? limitMaxValue : defaultLimitRange.max
+        );
+        setInputValue(
+          homingOvershootInput,
+          homingOvershootValue !== null ? homingOvershootValue : 0
+        );
+        setInputValue(
+          homingBackoffInput,
+          homingBackoffValue !== null ? homingBackoffValue : 0
         );
         updateLimitInputsState(limitsEnabled);
 
@@ -677,7 +719,18 @@
             const midRow = document.createElement("div");
             midRow.className = "limits-mid-row";
             midRow.append(createActionButton("Mid", "run-mid", motor.id, !canRun));
-            limitsRow.append(limitsTop, midRow);
+            const bottomRow = document.createElement("div");
+            bottomRow.className = "limits-bottom-row";
+            bottomRow.append(
+              createActionButton(
+                "Homing",
+                "run-homing",
+                motor.id,
+                !canRun,
+                ["secondary"]
+              )
+            );
+            limitsRow.append(limitsTop, midRow, bottomRow);
             limitsCell.append(limitsRow);
             tr.append(limitsCell);
           }
@@ -913,6 +966,12 @@
               limitMaxInput.value = defaultLimitRange.max;
             }
           }
+          if (homingOvershootInput.value === "") {
+            homingOvershootInput.value = "0";
+          }
+          if (homingBackoffInput.value === "") {
+            homingBackoffInput.value = "0";
+          }
         }
 
         updateLimitInputsState(enabled);
@@ -942,7 +1001,7 @@
         }
       });
 
-      [limitMinInput, limitMaxInput].forEach((input) => {
+      [limitMinInput, limitMaxInput, homingOvershootInput, homingBackoffInput].forEach((input) => {
         input.addEventListener("change", async () => {
           if (!limitsToggle.checked) {
             return;
@@ -964,10 +1023,14 @@
       });
 
       const sendRun = async (motorId, mode, direction) => {
+        const payload = { motorId, mode };
+        if (Number.isFinite(direction)) {
+          payload.direction = direction;
+        }
         const res = await fetch("/api/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ motorId, mode, direction }),
+          body: JSON.stringify(payload),
         });
         if (!res.ok) {
           const text = await res.text();
@@ -1158,6 +1221,15 @@
               targetPosition = Math.round((limits.min + limits.max) / 2);
             }
             await runToAbsolutePosition(motorId, targetPosition, label);
+          } else if (action === "run-homing") {
+            if (!currentState?.settings?.limitsEnabled) {
+              setHint(runHint, "Enable motion limits before homing", true);
+              return;
+            }
+            setHint(runHint, `Motor ${motorId}: starting homing…`);
+            const data = await sendRun(motorId, "homing");
+            renderState(data);
+            setHint(runHint, `Motor ${motorId}: homing in progress`);
           } else if (action === "run-pingpong") {
             await ensureTargetForMotor(motorId);
             setHint(runHint, `Motor ${motorId}: starting ping-pong…`);

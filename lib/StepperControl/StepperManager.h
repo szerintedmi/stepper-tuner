@@ -25,6 +25,7 @@ namespace StepperControl
 
     bool startSingle(uint16_t motorId, int direction);
     bool startPingPong(uint16_t motorId, int direction);
+    bool startHoming(uint16_t motorId);
     void stop(uint16_t motorId, bool aborted);
     void stopAll(bool aborted);
     void reset(uint16_t motorId);
@@ -61,6 +62,8 @@ namespace StepperControl
       bool limitsEnabled = false;
       long limitMin = 0;
       long limitMax = 0;
+      long homingOvershootSteps = 0;
+      long homingBackoffSteps = 0;
     } config;
 
     FastAccelStepperEngine engine;
@@ -98,6 +101,7 @@ namespace StepperControl
 
     bool beginMove(StepperMotor &motor, int direction, RunMode mode);
     void continuePingPong(StepperMotor &motor);
+    void continueHoming(StepperMotor &motor, unsigned long now);
     void stopMotor(StepperMotor &motor, bool aborted);
     void resetMotor(StepperMotor &motor);
     void applyMotionSettings(StepperMotor &motor);

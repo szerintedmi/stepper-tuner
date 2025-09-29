@@ -308,6 +308,14 @@ button:disabled {
   width: 70px;
   margin-top: 2px;
 }
+.limits-bottom-row {
+  display: flex;
+  justify-content: center;
+}
+.limits-bottom-row button {
+  width: 90px;
+  margin-top: 6px;
+}
 .form-actions {
   display: flex;
   gap: 10px;

@@ -43,6 +43,8 @@ namespace StepperControl
     {
     case RunMode::Single:
       return "single";
+    case RunMode::Homing:
+      return "homing";
     case RunMode::PingPong:
       return "pingpong";
     case RunMode::Idle:
@@ -85,6 +87,8 @@ namespace StepperControl
     settings["limitsEnabled"] = st.settings.limitsEnabled;
     settings["limitMin"] = st.settings.limitMin;
     settings["limitMax"] = st.settings.limitMax;
+    settings["homingOvershootSteps"] = st.settings.homingOvershootSteps;
+    settings["homingBackoffSteps"] = st.settings.homingBackoffSteps;
 
     JsonArray motors = obj["motors"].to<JsonArray>();
     for (const auto &motor : st.motors)
@@ -240,6 +244,17 @@ namespace StepperControl
       patch.limitMax = obj["limitMax"].as<long>();
     }
 
+    if (!obj["homingOvershootSteps"].isNull())
+    {
+      patch.hasHomingOvershootSteps = true;
+      patch.homingOvershootSteps = obj["homingOvershootSteps"].as<long>();
+    }
+    if (!obj["homingBackoffSteps"].isNull())
+    {
+      patch.hasHomingBackoffSteps = true;
+      patch.homingBackoffSteps = obj["homingBackoffSteps"].as<long>();
+    }
+
     motion.applySettings(patch);
 
     sendState(request);
@@ -282,6 +297,14 @@ namespace StepperControl
       if (!motion.startPingPong(motorId, direction))
       {
         sendError(request, 409, "Motor busy or invalid target");
+        return;
+      }
+    }
+    else if (strcmp(mode, "homing") == 0)
+    {
+      if (!motion.startHoming(motorId))
+      {
+        sendError(request, 409, "Motor busy or homing unavailable");
         return;
       }
     }

@@ -98,6 +98,15 @@ MoveResultCode StepperMotor::moveTo(long targetPosition)
   return stepper_->moveTo(targetPosition);
 }
 
+MoveResultCode StepperMotor::moveRelative(long deltaSteps)
+{
+  if (!stepper_)
+  {
+    return MOVE_ERR_ACCELERATION_IS_UNDEFINED;
+  }
+  return stepper_->move(deltaSteps);
+}
+
 bool StepperMotor::isRunning() const
 {
   return stepper_ && stepper_->isRunning();
@@ -198,6 +207,56 @@ void StepperMotor::startMove(int direction, long startPosition, unsigned long st
 void StepperMotor::updatePlannedSteps(long steps)
 {
   activeMove_.plannedSteps = steps < 0 ? -steps : steps;
+}
+
+void StepperMotor::beginHoming(unsigned long now, long forwardSteps, long backoffSteps, long limitMin, long limitMax)
+{
+  homing_.stage = HomingState::Stage::Forward;
+  homing_.commandQueued = false;
+  homing_.forwardSteps = forwardSteps < 0 ? 0 : forwardSteps;
+  homing_.backoffSteps = backoffSteps < 0 ? 0 : backoffSteps;
+  homing_.limitMin = limitMin;
+  homing_.limitMax = limitMax;
+  homing_.startMs = now;
+  homing_.totalSteps = 0;
+
+  if (homing_.forwardSteps == 0)
+  {
+    homing_.stage = homing_.backoffSteps > 0 ? HomingState::Stage::Backoff : HomingState::Stage::Center;
+  }
+}
+
+void StepperMotor::accumulateHomingSteps(long steps)
+{
+  if (steps < 0)
+  {
+    steps = -steps;
+  }
+  homing_.totalSteps += steps;
+}
+
+void StepperMotor::finishHoming(bool aborted, unsigned long now)
+{
+  lastRun.valid = true;
+  lastRun.aborted = aborted;
+  lastRun.startMs = homing_.startMs;
+  lastRun.durationMs = (homing_.startMs != 0) ? (now - homing_.startMs) : 0;
+  lastRun.steps = homing_.totalSteps;
+  lastRun.loopMaxGapUs = 0;
+
+  clearHomingState();
+}
+
+void StepperMotor::clearHomingState()
+{
+  homing_.stage = HomingState::Stage::Inactive;
+  homing_.commandQueued = false;
+  homing_.forwardSteps = 0;
+  homing_.backoffSteps = 0;
+  homing_.limitMin = 0;
+  homing_.limitMax = 0;
+  homing_.startMs = 0;
+  homing_.totalSteps = 0;
 }
 
 void StepperMotor::recordLastRun(bool aborted, unsigned long now, long currentPos)

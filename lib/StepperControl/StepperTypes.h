@@ -10,6 +10,7 @@ enum class RunMode : uint8_t
 {
   Idle,
   Single,
+  Homing,
   PingPong
 };
 
@@ -55,6 +56,12 @@ struct SettingsPatch
 
   bool hasLimitMax = false;
   long limitMax = 0;
+
+  bool hasHomingOvershootSteps = false;
+  long homingOvershootSteps = 0;
+
+  bool hasHomingBackoffSteps = false;
+  long homingBackoffSteps = 0;
 };
 
 struct StepperState
@@ -73,6 +80,8 @@ struct StepperState
     bool limitsEnabled = false;
     long limitMin = 0;
     long limitMax = 0;
+    long homingOvershootSteps = 0;
+    long homingBackoffSteps = 0;
   } settings;
 
   struct LimitStatus

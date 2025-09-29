@@ -27,6 +27,8 @@ namespace
 #define STEPPER_PREF_KEY_LIMIT_ENABLED "limEn"
 #define STEPPER_PREF_KEY_LIMIT_MIN "limMin"
 #define STEPPER_PREF_KEY_LIMIT_MAX "limMax"
+#define STEPPER_PREF_KEY_HOME_OVERSHOOT "homeOver"
+#define STEPPER_PREF_KEY_HOME_BACKOFF "homeBack"
 
 namespace StepperControl
 {
@@ -237,16 +239,20 @@ namespace StepperControl
 
     long defaultHalfSpan = roundToLong(static_cast<double>(config.stepsPerRev) / 2.0);
     long defaultLimitMin = -defaultHalfSpan;
-    long defaultLimitMax = defaultHalfSpan;
+   long defaultLimitMax = defaultHalfSpan;
     bool limitsEnabled = false;
     long limitMin = defaultLimitMin;
     long limitMax = defaultLimitMax;
+    long homingOvershoot = 0;
+    long homingBackoff = 0;
 
     if (prefsOpen)
     {
       limitsEnabled = prefs.getBool(STEPPER_PREF_KEY_LIMIT_ENABLED, limitsEnabled);
       limitMin = prefs.getLong(STEPPER_PREF_KEY_LIMIT_MIN, limitMin);
       limitMax = prefs.getLong(STEPPER_PREF_KEY_LIMIT_MAX, limitMax);
+      homingOvershoot = prefs.getLong(STEPPER_PREF_KEY_HOME_OVERSHOOT, homingOvershoot);
+      homingBackoff = prefs.getLong(STEPPER_PREF_KEY_HOME_BACKOFF, homingBackoff);
     }
 
     if (limitMin > limitMax)
@@ -255,9 +261,20 @@ namespace StepperControl
       limitMax = defaultLimitMax;
     }
 
+    if (homingOvershoot < 0)
+    {
+      homingOvershoot = 0;
+    }
+    if (homingBackoff < 0)
+    {
+      homingBackoff = 0;
+    }
+
     config.limitsEnabled = limitsEnabled;
     config.limitMin = limitMin;
     config.limitMax = limitMax;
+    config.homingOvershootSteps = homingOvershoot;
+    config.homingBackoffSteps = homingBackoff;
 
     updateTarget(TargetUnits::Revs, DEFAULT_REVS);
   }
@@ -503,6 +520,141 @@ namespace StepperControl
     }
   }
 
+  void StepperManager::continueHoming(StepperMotor &motor, unsigned long now)
+  {
+    if (motor.mode != RunMode::Homing)
+    {
+      return;
+    }
+
+    auto &homing = motor.homingState();
+
+    auto abortHoming = [&](int errorCode)
+    {
+      if (errorCode != 0)
+      {
+        Serial.printf("StepperControl: Homing move failed (%d) for motor %u\n", errorCode, motor.id());
+      }
+      motor.finishHoming(true, now);
+      motor.mode = RunMode::Idle;
+      motor.updatePlannedSteps(config.target.steps);
+    };
+
+    auto queueRelative = [&](long steps) -> bool
+    {
+      if (steps == 0)
+      {
+        homing.commandQueued = false;
+        return true;
+      }
+
+      int direction = (steps >= 0) ? 1 : -1;
+      long magnitude = steps >= 0 ? steps : -steps;
+      long startPosition = motor.getCurrentPosition();
+      motor.startMove(direction, startPosition, now);
+      motor.updatePlannedSteps(magnitude);
+      MoveResultCode res = motor.moveRelative(steps);
+      if (res != MOVE_OK)
+      {
+        abortHoming(static_cast<int>(res));
+        return false;
+      }
+      motor.accumulateHomingSteps(magnitude);
+      homing.commandQueued = true;
+      return true;
+    };
+
+    while (motor.mode == RunMode::Homing)
+    {
+      using Stage = StepperMotor::HomingState::Stage;
+
+      switch (homing.stage)
+      {
+      case Stage::Inactive:
+        return;
+
+      case Stage::Forward:
+        if (!homing.commandQueued)
+        {
+          if (homing.forwardSteps == 0)
+          {
+            homing.stage = (homing.backoffSteps > 0) ? Stage::Backoff : Stage::Center;
+            continue;
+          }
+          if (!queueRelative(homing.forwardSteps))
+          {
+            return;
+          }
+          return;
+        }
+        if (motor.isRunning())
+        {
+          return;
+        }
+        homing.commandQueued = false;
+        homing.stage = (homing.backoffSteps > 0) ? Stage::Backoff : Stage::Center;
+        continue;
+
+      case Stage::Backoff:
+        if (!homing.commandQueued)
+        {
+          if (homing.backoffSteps == 0)
+          {
+            homing.stage = Stage::Center;
+            continue;
+          }
+          if (!queueRelative(-homing.backoffSteps))
+          {
+            return;
+          }
+          return;
+        }
+        if (motor.isRunning())
+        {
+          return;
+        }
+        homing.commandQueued = false;
+        homing.stage = Stage::Center;
+        continue;
+
+      case Stage::Center:
+        if (!homing.commandQueued)
+        {
+          motor.setCurrentPosition(homing.limitMax);
+          long mid = (homing.limitMin + homing.limitMax) / 2;
+          long current = motor.getCurrentPosition();
+          long delta = mid - current;
+          if (delta == 0)
+          {
+            motor.setCurrentPosition(mid);
+            motor.finishHoming(false, now);
+            motor.mode = RunMode::Idle;
+            motor.updatePlannedSteps(config.target.steps);
+            return;
+          }
+          if (!queueRelative(delta))
+          {
+            return;
+          }
+          return;
+        }
+        if (motor.isRunning())
+        {
+          return;
+        }
+        homing.commandQueued = false;
+        {
+          long mid = (homing.limitMin + homing.limitMax) / 2;
+          motor.setCurrentPosition(mid);
+          motor.finishHoming(false, now);
+          motor.mode = RunMode::Idle;
+          motor.updatePlannedSteps(config.target.steps);
+        }
+        return;
+      }
+    }
+  }
+
   void StepperManager::stopMotor(StepperMotor &motor, bool aborted)
   {
     if (!motor.isAttached())
@@ -513,8 +665,17 @@ namespace StepperControl
       return;
     }
 
+    bool homingActive = motor.mode == RunMode::Homing || motor.homingActive();
     bool wasRunning = (motor.mode != RunMode::Idle) || motor.isRunning();
     motor.forceStopAtCurrentPosition();
+
+    if (homingActive)
+    {
+      motor.finishHoming(aborted, millis());
+      motor.mode = RunMode::Idle;
+      motor.updatePlannedSteps(config.target.steps);
+      return;
+    }
 
     if (wasRunning)
     {
@@ -553,11 +714,9 @@ namespace StepperControl
         continue;
       }
 
-      bool moving = motor.isRunning();
-
       if (motor.mode == RunMode::Single)
       {
-        if (!moving)
+        if (!motor.isRunning())
         {
           motor.recordLastRun(false, now, motor.getCurrentPosition());
           motor.mode = RunMode::Idle;
@@ -566,14 +725,20 @@ namespace StepperControl
       }
       else if (motor.mode == RunMode::PingPong)
       {
-        if (!moving)
+        if (!motor.isRunning())
         {
           continuePingPong(motor);
-          moving = motor.isRunning();
         }
       }
+      else if (motor.mode == RunMode::Homing)
+      {
+        continueHoming(motor, now);
+      }
 
-      if (!moving && motor.mode == RunMode::Idle)
+      bool homingActive = motor.homingActive();
+      bool moving = motor.isRunning();
+
+      if (!moving && !homingActive && motor.mode == RunMode::Idle)
       {
         if (motor.driverAwake() && config.autoSleep)
         {
@@ -614,6 +779,8 @@ namespace StepperControl
     out.settings.limitsEnabled = config.limitsEnabled;
     out.settings.limitMin = config.limitMin;
     out.settings.limitMax = config.limitMax;
+    out.settings.homingOvershootSteps = config.homingOvershootSteps;
+    out.settings.homingBackoffSteps = config.homingBackoffSteps;
 
     out.limit.triggered = limitEventSequence != lastReportedLimitEventSequence;
     out.limit.sequence = limitEventSequence;
@@ -634,7 +801,8 @@ namespace StepperControl
       if (motor.isAttached())
       {
         bool running = motor.isRunning();
-        report.moving = running;
+        bool homingActive = motor.homingActive();
+        report.moving = running || homingActive;
         long currentPosition = motor.getCurrentPosition();
         long targetPosition = motor.getTargetPosition();
         report.currentPosition = currentPosition;
@@ -808,6 +976,50 @@ namespace StepperControl
     return beginMove(*motor, direction, RunMode::PingPong);
   }
 
+  bool StepperManager::startHoming(uint16_t motorId)
+  {
+    StepperMotor *motor = findMotor(motorId);
+    if (!motor)
+    {
+      return false;
+    }
+    if (motor->mode != RunMode::Idle)
+    {
+      return false;
+    }
+    if (!motor->isAttached())
+    {
+      return false;
+    }
+    if (!config.limitsEnabled)
+    {
+      Serial.println("StepperControl: Homing requested but limits are disabled");
+      return false;
+    }
+    if (config.stepsPerRev <= 0)
+    {
+      return false;
+    }
+
+    if (!motor->ensureDriverAwake(DRIVER_WAKE_DELAY_MS))
+    {
+      return false;
+    }
+
+    unsigned long now = millis();
+    long overshoot = config.homingOvershootSteps < 0 ? 0 : config.homingOvershootSteps;
+    long backoff = config.homingBackoffSteps < 0 ? 0 : config.homingBackoffSteps;
+    long forwardSteps = config.stepsPerRev + overshoot;
+
+    motor->resetRuntimeState();
+    motor->beginHoming(now, forwardSteps, backoff, config.limitMin, config.limitMax);
+    motor->mode = RunMode::Homing;
+    motor->clearAutoSleepTimer();
+
+    continueHoming(*motor, now);
+    return true;
+  }
+
   void StepperManager::stop(uint16_t motorId, bool aborted)
   {
     StepperMotor *motor = findMotor(motorId);
@@ -859,6 +1071,8 @@ namespace StepperControl
     ok &= prefs.putBool(STEPPER_PREF_KEY_LIMIT_ENABLED, config.limitsEnabled) > 0;
     ok &= prefs.putLong(STEPPER_PREF_KEY_LIMIT_MIN, config.limitMin) > 0;
     ok &= prefs.putLong(STEPPER_PREF_KEY_LIMIT_MAX, config.limitMax) > 0;
+    ok &= prefs.putLong(STEPPER_PREF_KEY_HOME_OVERSHOOT, config.homingOvershootSteps) > 0;
+    ok &= prefs.putLong(STEPPER_PREF_KEY_HOME_BACKOFF, config.homingBackoffSteps) > 0;
     persistMotors();
     return ok;
   }
@@ -998,6 +1212,15 @@ namespace StepperControl
     config.limitsEnabled = nextLimitsEnabled;
     config.limitMin = nextLimitMin;
     config.limitMax = nextLimitMax;
+
+    if (patch.hasHomingOvershootSteps)
+    {
+      config.homingOvershootSteps = patch.homingOvershootSteps < 0 ? 0 : patch.homingOvershootSteps;
+    }
+    if (patch.hasHomingBackoffSteps)
+    {
+      config.homingBackoffSteps = patch.homingBackoffSteps < 0 ? 0 : patch.homingBackoffSteps;
+    }
 
     applyMotionSettingsAll();
   }

@@ -30,6 +30,7 @@ namespace StepperControl
     void clearAutoSleepTimer() { autoSleepRequestMs_ = 0; }
 
     MoveResultCode moveTo(long targetPosition);
+    MoveResultCode moveRelative(long deltaSteps);
     bool isRunning() const;
     long getCurrentPosition() const;
     long getTargetPosition() const;
@@ -43,6 +44,33 @@ namespace StepperControl
     void startMove(int direction, long startPosition, unsigned long startMillis);
     void recordLastRun(bool aborted, unsigned long now, long currentPos);
     void updatePlannedSteps(long steps);
+
+    struct HomingState
+    {
+      enum class Stage : uint8_t
+      {
+        Inactive,
+        Forward,
+        Backoff,
+        Center
+      } stage = Stage::Inactive;
+
+      bool commandQueued = false;
+      long forwardSteps = 0;
+      long backoffSteps = 0;
+      long limitMin = 0;
+      long limitMax = 0;
+      unsigned long startMs = 0;
+      long totalSteps = 0;
+    };
+
+    void beginHoming(unsigned long now, long forwardSteps, long backoffSteps, long limitMin, long limitMax);
+    void accumulateHomingSteps(long steps);
+    void finishHoming(bool aborted, unsigned long now);
+    void clearHomingState();
+    bool homingActive() const { return homing_.stage != HomingState::Stage::Inactive; }
+    HomingState &homingState() { return homing_; }
+    const HomingState &homingState() const { return homing_; }
 
     struct ActiveMove
     {
@@ -75,6 +103,7 @@ namespace StepperControl
     unsigned long autoSleepRequestMs_ = 0;
     ActiveMove activeMove_;
     long lastKnownPosition_ = 0;
+    HomingState homing_;
   };
 
 } // namespace StepperControl
