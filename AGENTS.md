@@ -4,12 +4,15 @@
 
 - ESP32/PlatformIO firmware that serves a web UI + JSON API to orchestrate 4-wire stepper via FastAccelStepper (see `./README.md`).
 - `src/`: Arduino entry points (`setup`/`loop`) wiring StepperControl + WifiPortal.
-- `lib/StepperControl`: motion orchestration, REST handlers, drivetrain limits, and persisting motion defaults via ESP `Preferences`.
+- `lib/StepperControl`: StepperManager-driven multi-motor orchestration (single/pingpong/homing), REST handlers, limit + homing config, and persistence for shared settings and motor pin maps via ESP `Preferences`.
+  - `StepperManager.*` – central state machine and settings persistence.
+  - `StepperMotor.*` – per-motor hardware wrapper, driver sleep, homing bookkeeping.
+  - `StepperHttpRoutes.*` – JSON API surface mounted on ESPAsyncWebServer.
 - `lib/WifiPortal`: Wi-Fi AP/setup helper wrapping ESPAsyncWebServer + ESP-NOW mesh bootstrap.
 - `include/`: headers meant for global include; `secrets.h` overrides AP creds (keep private values out of commits).
 - `data_src/`: uncompressed web assets; build step mirrors/gzips into `data/` for LittleFS image.
-  - 'data_src/index.html` – main web UI.
-  - 'data_src/wifi` – Wi-Fi setup portal UI.
+  - `data_src/index.html` – main web UI: multi-motor editor, run controls, limit/homing tuning, live telemetry.
+  - `data_src/wifi` – Wi-Fi setup portal UI.
 
 - `tools/`: build helpers (`gzip_fs.py` pre-action for filesystem image).
 
@@ -43,8 +46,8 @@ Note: This section might have drift from reality
 - Project overview & quick start: `./README.md`
 - Access point/secrets guidance: `include/README`.
 - Web portal behavior & mesh bootstrap: `lib/WifiPortal/WifiPortal.h`.
-- Motion/REST surface: `lib/StepperControl/StepperControl.cpp` & `lib/StepperControl/StepperHttpRoutes.*`.
-- Motion defaults persistence: `lib/StepperControl/StepperMotion.*` exposes `saveDefaults` / `restoreDefaults` and stores steps-per-rev, max speed, acceleration, and auto-sleep in NVS (`Preferences`).
+- Motion/REST surface: `lib/StepperControl/StepperControl.cpp`, `StepperManager.*`, `StepperMotor.*`, `StepperHttpRoutes.*`.
+- Motion defaults & motor persistence: `StepperManager.*` handles shared settings (target units/values, speed/accel, auto-sleep, limit window, homing overshoot/backoff) plus the motor roster in NVS (`Preferences`).
 - UI defaults workflow: `data_src/index.html` has a "Save defaults" button (with confirmation) and "Reset to default" that call `/api/settings/default/save|restore`.
 
 Note: This section might have drift from reality
